@@ -1,0 +1,5 @@
+commodity,sitc,is_primary,notes
+iron_ore,281,true,SITC 281 — iron ore and concentrates
+coal,321,true,SITC 321 — coal (thermal and anthracite)
+coal,322,false,SITC 322 — coke and semi-coke of coal
+lng,343,true,SITC 343 — natural gas liquefied or gaseous; LNG dominates AUS share

@@ -1,0 +1,39 @@
+# R
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# renv — lock file is committed, library is not
+renv/library/
+renv/local/
+renv/cellar/
+renv/python/
+renv/staging/
+
+# Secrets
+.Renviron
+
+# Pipeline artefacts
+data/cache/
+data/warehouse.duckdb
+data/warehouse.duckdb.wal
+outputs/
+logs/
+
+# targets metadata — keep the DAG but not the object store
+_targets/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code local config
+.claude/
+
+# Quarto
+/.quarto/
+reports/briefing/briefing_files/
+reports/briefing/briefing.html
+reports/briefing/briefing.pdf

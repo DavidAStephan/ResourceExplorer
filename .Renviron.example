@@ -1,0 +1,12 @@
+# Copy to .Renviron (gitignored) and fill in values.
+# Reload with readRenviron(".Renviron") or by restarting R.
+
+# FRED — required. Register at https://fred.stlouisfed.org/docs/api/api_key.html
+FRED_API_KEY=
+
+# IMF PortWatch — not currently required (public ArcGIS FeatureServer).
+# Set only if we discover a gated endpoint in Phase 2.
+# PORTWATCH_API_KEY=
+
+# Optional: override the log level for logger (TRACE/DEBUG/INFO/WARN/ERROR)
+# RESOURCETRACKER_LOG_LEVEL=INFO

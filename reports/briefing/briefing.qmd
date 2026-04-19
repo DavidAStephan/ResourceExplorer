@@ -1,0 +1,180 @@
+---
+title: "Australian Real Goods Nowcast — Briefing"
+subtitle: "resourcetracker · weekly run"
+date: today
+format:
+  html:
+    toc: true
+    self-contained: true
+    theme: cosmo
+  pdf:
+    toc: true
+    geometry: margin=1in
+execute:
+  echo: false
+  warning: false
+  message: false
+params:
+  outputs_dir: "../../outputs"
+  warehouse:  "../../data/warehouse.duckdb"
+---
+
+```{r setup}
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(fs)
+library(DBI)
+library(duckdb)
+
+outputs  <- params$outputs_dir
+wh_path  <- params$warehouse
+
+nowcast    <- read_csv(path(outputs, "nowcast_current.csv"),
+                       show_col_types = FALSE)
+tonnage    <- read_csv(path(outputs, "tonnage_monthly.csv"),
+                       show_col_types = FALSE)
+diag_fit   <- read_csv(path(outputs, "bridge_diagnostics.csv"),
+                       show_col_types = FALSE)
+
+con <- tryCatch(
+  dbConnect(duckdb(), dbdir = wh_path, read_only = TRUE),
+  error = function(e) NULL
+)
+
+pull_safely <- function(sql) {
+  if (is.null(con)) return(tibble())
+  tryCatch(as_tibble(dbGetQuery(con, sql)), error = function(e) tibble())
+}
+
+history   <- pull_safely("SELECT * FROM mart.nowcast_history ORDER BY run_timestamp")
+abs_5302  <- pull_safely("SELECT * FROM raw.abs_5302_quarterly ORDER BY quarter_end")
+```
+
+## Headline nowcast
+
+```{r headline}
+if (nrow(nowcast) == 0 || is.na(nowcast$point_estimate[1])) {
+  cat("*No nowcast available this run.*")
+} else {
+  nc <- nowcast[1, ]
+  cat(sprintf(
+    "**Quarter %s:** A$%s million (80%% CI: A$%s – A$%s; 95%% CI: A$%s – A$%s). Share of quarter observed: %.0f%%.",
+    format(nc$quarter_end, "%b %Y"),
+    formatC(nc$point_estimate, format = "d", big.mark = ","),
+    formatC(nc$lower_80,       format = "d", big.mark = ","),
+    formatC(nc$upper_80,       format = "d", big.mark = ","),
+    formatC(nc$lower_95,       format = "d", big.mark = ","),
+    formatC(nc$upper_95,       format = "d", big.mark = ","),
+    100 * nc$share_observed
+  ))
+}
+```
+
+```{r headline-plot, fig.width=7, fig.height=3.5}
+if (nrow(history) > 0) {
+  history |>
+    mutate(quarter_end = as.Date(quarter_end)) |>
+    ggplot(aes(run_timestamp, point_estimate)) +
+    geom_ribbon(aes(ymin = lower_95, ymax = upper_95), alpha = 0.15) +
+    geom_ribbon(aes(ymin = lower_80, ymax = upper_80), alpha = 0.25) +
+    geom_line() +
+    labs(x = "Run timestamp",
+         y = "Real goods credits (A$m, chain-volume)",
+         title = "Nowcast evolution within the current quarter") +
+    theme_minimal()
+}
+```
+
+## Commodity decomposition
+
+```{r decomposition}
+if (nrow(tonnage) > 0) {
+  tonnage |>
+    filter(!is.na(commodity)) |>
+    group_by(commodity) |>
+    summarise(tonnage = sum(tonnage, na.rm = TRUE), .groups = "drop") |>
+    mutate(share = tonnage / sum(tonnage)) |>
+    arrange(desc(share)) |>
+    knitr::kable(digits = c(NA, 0, 3),
+                 col.names = c("Commodity", "Tonnage (summed)", "Share"))
+} else {
+  cat("*Tonnage panel empty.*")
+}
+```
+
+## Change since last run
+
+```{r delta}
+if (nrow(history) >= 2) {
+  current <- history[nrow(history), ]
+  prev    <- history[nrow(history) - 1, ]
+  tibble(
+    metric = c("Point estimate", "80% lower", "80% upper",
+               "95% lower", "95% upper", "Share observed"),
+    prior  = c(prev$point_estimate, prev$lower_80, prev$upper_80,
+               prev$lower_95, prev$upper_95, prev$share_observed),
+    now    = c(current$point_estimate, current$lower_80, current$upper_80,
+               current$lower_95, current$upper_95, current$share_observed),
+    delta  = c(current$point_estimate - prev$point_estimate,
+               current$lower_80       - prev$lower_80,
+               current$upper_80       - prev$upper_80,
+               current$lower_95       - prev$lower_95,
+               current$upper_95       - prev$upper_95,
+               current$share_observed - prev$share_observed)
+  ) |>
+    knitr::kable(digits = c(NA, 1, 1, 1))
+} else {
+  cat("*First run this quarter — no prior run to compare against.*")
+}
+```
+
+## Comparison to ABS latest actual
+
+```{r abs-compare}
+if (nrow(abs_5302) > 0) {
+  latest_abs <- abs_5302 |>
+    filter(!is.na(value_chainvol_aud_m), value_chainvol_aud_m > 0) |>
+    arrange(desc(quarter_end)) |>
+    slice(1)
+  cat(sprintf(
+    "Latest ABS 5302.0 actual (quarter ending %s): **A$%s million**.\n\n",
+    format(as.Date(latest_abs$quarter_end), "%b %Y"),
+    formatC(latest_abs$value_chainvol_aud_m,
+            format = "d", big.mark = ",")
+  ))
+} else {
+  cat("*ABS 5302.0 panel empty.*")
+}
+```
+
+## Flagged anomalies
+
+```{r anomalies-table}
+anoms <- pull_safely(
+  "SELECT obs_date, port_id, commodity, tonnage, z_score
+   FROM mart.latest_anomalies
+   ORDER BY ABS(z_score) DESC LIMIT 10"
+)
+if (nrow(anoms) > 0) {
+  knitr::kable(anoms, digits = c(NA, NA, NA, 0, 2))
+} else {
+  cat("*No >2σ departures flagged in the last 28 days.*")
+}
+```
+
+## Methodology footnote
+
+Bridge regression per commodity on log levels with an AR(1) lag:
+
+$$\log y_{c,m} = \beta_0 + \beta_1 \log T^{SA}_{c,m} + \beta_2 \log P_{c,m} + \beta_3 \log y_{c,m-1} + \varepsilon_{c,m}$$
+
+Fit on 2019-01 → 2023-12; validated on 2024+. Newey-West SEs, lag 3.
+Quarterly aggregate converted to chain-volume via the ABS 5302.0
+implicit deflator (trailing 4-quarter mean as forecast). Uncertainty
+bands via 1,000 bootstrap draws of bridge residuals, scaled by
+$\sqrt{1 - \text{share\_observed}}$.
+
+```{r close-con}
+if (!is.null(con)) dbDisconnect(con, shutdown = TRUE)
+```

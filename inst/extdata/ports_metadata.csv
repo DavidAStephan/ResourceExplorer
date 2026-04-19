@@ -1,0 +1,16 @@
+port_id,port_name,iso3,lat,lon,commodity_class,sitc_map
+PHED,Port Hedland,AUS,-20.3107,118.5769,iron_ore,281
+DAMP,Dampier,AUS,-20.6628,116.7131,iron_ore,281
+WALC,Port Walcott,AUS,-20.5983,117.1778,iron_ore,281
+NEWC,Newcastle,AUS,-32.9272,151.7897,coal,321
+HAYP,Hay Point,AUS,-21.2761,149.2961,coal,322
+ABBO,Abbot Point,AUS,-19.8667,148.0833,coal,321
+GLAD,Gladstone,AUS,-23.8400,151.2550,coal,321
+DARW,Darwin,AUS,-12.4739,130.8470,lng,343
+KARR,Karratha,AUS,-20.7364,116.8464,lng,343
+WHEA,Wheatstone,AUS,-21.6500,115.0000,lng,343
+BARR,Barrow Island,AUS,-20.8000,115.4500,lng,343
+PREL,Prelude FLNG,AUS,-13.8333,123.3333,lng,343
+BRIS,Brisbane,AUS,-27.3833,153.1667,other,
+MELB,Melbourne,AUS,-37.8400,144.9000,other,
+SYD,Sydney,AUS,-33.8523,151.2108,other,

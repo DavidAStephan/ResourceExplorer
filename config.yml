@@ -1,0 +1,66 @@
+default:
+  paths:
+    warehouse:       "data/warehouse.duckdb"
+    cache:           "data/cache"
+    outputs:         "outputs"
+    logs:            "logs"
+    ports_metadata:  "inst/extdata/ports_metadata.csv"
+    sitc_crosswalk:  "inst/extdata/sitc_crosswalk.csv"
+    schema_sql:      "inst/sql/schema.sql"
+
+  sample:
+    train_start: "2019-01-01"
+    train_end:   "2023-12-31"
+    valid_start: "2024-01-01"
+
+  commodities:
+    - iron_ore
+    - coal
+    - lng
+    - other
+
+  cache:
+    # Cache is a fallback, not a freshness policy. Every tar_make refreshes
+    # from source. If the fetch fails, we fall back to the most recent
+    # cached RDS and tag the returned tibble with attr(x, "cache_status").
+    enabled: true
+
+  portwatch:
+    # IMF PortWatch daily trade panel — public ArcGIS FeatureServer.
+    # Placeholder URL; validated in Phase 2 live run. Override at runtime
+    # via Sys.setenv(PORTWATCH_BASE_URL=...) if the layer ID moves.
+    base_url: "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/PortWatch_daily_trade_panel/FeatureServer/0"
+    countries: ["AUS"]
+    page_size: 2000
+    retry:
+      max_attempts: 3
+      backoff_seconds: 5
+
+  abs:
+    cat_5368:        "5368.0"
+    tables_5368:     ["12a", "12b"]   # SITC FOB exports, monthly
+    cat_5302:        "5302.0"
+    tables_5302:     ["1", "2"]       # BoP goods credits, quarterly
+    # SITC 3-digit codes mapped to our bridge-regression commodities.
+    # LNG: SITC 343 includes non-LNG natural gas; LNG dominates AUS exports
+    # of 343 so this is an MVP proxy. Upgrade to HS 2711.11 in Phase 3 if
+    # residuals warrant it.
+    commodity_sitc:
+      iron_ore: ["281"]
+      coal:     ["321", "322"]
+      lng:      ["343"]
+
+  fred:
+    series_ids:
+      - "PIORECRUSDM"   # Iron ore, China import CFR
+      - "PCOALAUUSDM"   # Coal, Australia thermal
+      - "PNGASJPUSDM"   # Natural gas, Japan LNG
+    # Required env var: FRED_API_KEY (from .Renviron). Fetch gracefully
+    # degrades to cache when unset.
+
+  nowcast:
+    bootstrap_reps: 1000
+    seed: 20260419
+
+  logging:
+    level: "INFO"

@@ -1,0 +1,115 @@
+Fit on 2019-2023, validate on 2024-present. Report RMSE vs a naive
+seasonal-random-walk benchmark.
+
+Running nowcast at any date t within quarter Q:
+- Observed PortWatch tonnage through day t
+- Extrapolate remainder of the quarter using seasonal patterns and
+  recent daily pace
+- Apply bridge regression to get implied ABS monthly volumes
+- Aggregate to quarterly
+- Apply chain-volume conversion to produce real-term estimate
+
+Uncertainty bands via bootstrap of bridge regression residuals, adjusted
+for the share of the quarter already observed (shrinks as quarter
+progresses).
+
+## Outputs
+
+1. **Briefing document** (Quarto PDF + HTML). Auto-generated. Sections:
+   - Headline nowcast for current quarter
+   - Commodity decomposition (iron ore, coal, LNG contributions)
+   - Change since last run (news decomposition)
+   - Comparison to ABS latest actual
+   - Flagged anomalies (departures >2σ from seasonal norm)
+   - Methodology footnote
+
+2. **Shiny dashboard** (`reports/dashboard/app.R`). Local only, no deploy.
+   - Live running nowcast with uncertainty bands
+   - Daily tonnage by port, commodity
+   - Backtest performance panel
+   - Download buttons for CSV of the series
+
+3. **CSV exports** in `outputs/` for every run:
+   - `nowcast_current.csv` — current quarter running estimate
+   - `tonnage_daily.csv` — full daily series
+   - `tonnage_monthly.csv` — aggregated monthly
+   - `bridge_diagnostics.csv` — model fit stats
+
+## Build plan — work in phases, check in between each
+
+Phase 1: Scaffolding
+- Set up R package structure with DESCRIPTION, NAMESPACE
+- Set up targets pipeline skeleton
+- Set up DuckDB warehouse with schema
+- Write config.yml and loader
+- Set up testthat
+- Confirm it all runs end-to-end with stub functions
+- STOP and wait for review
+
+Phase 2: Data ingestion
+- PortWatch API client with caching and retry
+- readabs wrappers for 5368.0 and 5302.0
+- FRED price pulls
+- Hand-curate ports_metadata.csv
+- Load into DuckDB warehouse
+- Unit tests on each ingestion function
+- STOP and wait for review
+
+Phase 3: Modelling
+- Seasonal adjustment wrapper
+- Bridge regression per commodity
+- Backtest on 2019-2023, validate on 2024+
+- Report RMSE vs naive benchmark
+- STOP and wait for review
+
+Phase 4: Nowcast and outputs
+- Running nowcast logic
+- Briefing Quarto document
+- Shiny dashboard
+- CSV exports
+- Integration test of the full pipeline
+- STOP for final review
+
+Phase 5: Polish
+- README with install instructions
+- Methodology notes
+- Disabled GitHub Actions template
+- Linting clean, all tests passing
+
+## Constraints and preferences
+
+- I code in R normally, so explain econometric choices in R terminology
+- Assume I know `tidyverse`, `targets`, and basic time series
+- Default to `dplyr`/`tidyr` over base R for data manipulation
+- Use `fable`/`tsibble` for time series where practical
+- Comment the bridge regression choices thoroughly — this is the
+  analytically interesting part
+- Don't over-engineer — MVP first, extensions later
+- Every external API call must have a cached fallback so the pipeline
+  can run offline with stale data
+- Log everything to `logs/` with timestamps
+
+## What success looks like
+
+When I run `targets::tar_make()` on a Tuesday morning:
+1. Latest PortWatch data pulls successfully
+2. Warehouse updates
+3. Bridge models refit
+4. Current-quarter nowcast updates
+5. Briefing PDF lands in `reports/`
+6. All tests pass
+7. Total runtime under 5 minutes
+
+When March 2026 ITG is released by ABS in early May, I can compare my
+April 1 nowcast (constructed from AIS data alone) to the ABS actual and
+quantify the forecast error. Target: RMSE at least 30% below a
+seasonal-naive benchmark on the 2024+ validation sample.
+
+## First steps for you
+
+1. Read this brief in full
+2. Ask me clarifying questions if anything is ambiguous — especially
+   around the bridge model specification or the ABS series I'm targeting
+3. Propose the Phase 1 scaffolding and wait for my approval before
+   writing code
+4. Work through the phases in order, stopping at each checkpoint

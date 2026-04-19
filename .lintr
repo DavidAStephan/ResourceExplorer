@@ -1,0 +1,18 @@
+linters: linters_with_defaults(
+  line_length_linter(100),
+  object_name_linter(styles = c("snake_case", "dotted.case")),
+  # The %||% infix is defined in R/logging.R and used across files;
+  # lintr's static scan can't see the cross-file definition. Silence.
+  undesirable_operator_linter = NULL,
+  # Allow .data$col in dplyr expressions without the tidy-eval warning.
+  object_usage_linter = NULL,
+  # We use <- consistently except in function-default positions.
+  assignment_linter = NULL
+)
+exclusions: list(
+  "_targets.R",
+  "reports/dashboard/app.R",
+  "reports/briefing/briefing.qmd",
+  "tests/testthat/test-pipeline-stubs.R"
+)
+encoding: "UTF-8"
