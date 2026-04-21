@@ -32,18 +32,10 @@ fetch_portwatch_tonnage <- function(cfg, db_ready) {
     stop(e)
   })
 
-  con <- warehouse_connect(cfg)
-  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
-  DBI::dbExecute(con, "DELETE FROM raw.portwatch_tonnage_daily")
-  if (nrow(result) > 0) {
-    DBI::dbWriteTable(con,
-                      DBI::Id(schema = "raw", table = "portwatch_tonnage_daily"),
-                      result, append = TRUE)
-  }
+  wh_write("raw_portwatch_tonnage_daily", result, cfg)
 
   log_ingest_run(cfg, "portwatch", started, nrow(result), status)
-  logger::log_info("fetch_portwatch_tonnage -- {nrow(result)} rows ({status})",
-                   namespace = "resourcetracker")
+  log_info("fetch_portwatch_tonnage -- %d rows (%s)", nrow(result), status)
   result
 }
 
@@ -78,8 +70,7 @@ pull_portwatch_pages <- function(cfg) {
     body <- httr2::resp_body_string(resp)
     page <- parse_portwatch_features(body)
     acc[[length(acc) + 1L]] <- page
-    logger::log_debug("portwatch page offset={offset} rows={nrow(page)}",
-                      namespace = "resourcetracker")
+    log_debug("portwatch page offset=%d rows=%d", offset, nrow(page))
 
     if (nrow(page) < page_size) break
     offset <- offset + page_size

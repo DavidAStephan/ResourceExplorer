@@ -16,36 +16,25 @@ LazyData: true
 Depends:
     R (>= 4.2)
 Imports:
-    DBI,
-    config,
     dplyr,
-    duckdb,
     fredr,
     fs,
     httr2,
     jsonlite,
-    logger,
     lubridate,
     purrr,
-    quarto,
     readabs,
     readr,
     rlang,
-    sandwich,
-    seasonal,
+    rmarkdown,
     stringr,
     tibble,
     tidyr
 Suggests:
-    devtools,
-    fable,
     ggplot2,
-    httptest2,
     knitr,
     lintr,
     shiny,
-    tarchetypes,
-    targets,
     testthat (>= 3.0.0),
     tsibble,
     withr

@@ -16,8 +16,7 @@ fetch_fred_prices <- function(cfg, db_ready) {
   key <- Sys.getenv("FRED_API_KEY", unset = "")
   fetcher <- if (!nzchar(key)) {
     function() {
-      logger::log_warn("FRED_API_KEY not set -- returning NULL to trigger cache fallback",
-                       namespace = "resourcetracker")
+      log_warn("FRED_API_KEY not set -- returning NULL to trigger cache fallback")
       NULL
     }
   } else {
@@ -47,17 +46,9 @@ fetch_fred_prices <- function(cfg, db_ready) {
 
   result <- dplyr::mutate(result, ingested_at = Sys.time())
 
-  con <- warehouse_connect(cfg)
-  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
-  DBI::dbExecute(con, "DELETE FROM raw.fred_prices_daily")
-  if (nrow(result) > 0) {
-    DBI::dbWriteTable(con,
-                      DBI::Id(schema = "raw", table = "fred_prices_daily"),
-                      result, append = TRUE)
-  }
+  wh_write("raw_fred_prices_daily", result, cfg)
 
   log_ingest_run(cfg, "fred", started, nrow(result), status)
-  logger::log_info("fetch_fred_prices -- {nrow(result)} rows ({status})",
-                   namespace = "resourcetracker")
+  log_info("fetch_fred_prices -- %d rows (%s)", nrow(result), status)
   result
 }

@@ -38,10 +38,9 @@ test_that("fetch_portwatch_tonnage falls back to cache on HTTP failure", {
   tmp <- withr::local_tempdir()
   cfg <- list(
     paths = list(
-      warehouse  = file.path(tmp, "wh.duckdb"),
-      schema_sql = system.file("sql", "schema.sql", package = "resourcetracker"),
-      cache      = file.path(tmp, "cache"),
-      logs       = file.path(tmp, "logs")
+      warehouse_dir = file.path(tmp, "warehouse"),
+      cache         = file.path(tmp, "cache"),
+      logs          = file.path(tmp, "logs")
     ),
     sample = list(train_start = "2019-01-01"),
     portwatch = list(
@@ -65,9 +64,9 @@ test_that("fetch_portwatch_tonnage falls back to cache on HTTP failure", {
   )
   cache_write(cfg, "portwatch", "daily_trade_panel", seed)
 
-  # example.invalid doesn't resolve — fetcher errors, with_cache falls
+  # example.invalid doesn't resolve -- fetcher errors, with_cache falls
   # back to the seeded cache above.
-  out <- fetch_portwatch_tonnage(cfg, cfg$paths$warehouse)
+  out <- fetch_portwatch_tonnage(cfg, cfg$paths$warehouse_dir)
   expect_equal(nrow(out), 1)
   expect_equal(out$port_id, "PHED")
 })

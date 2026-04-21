@@ -22,9 +22,8 @@ fixture_anomaly_pw <- function() {
 test_that("detect_anomalies flags an injected spike", {
   tmp <- withr::local_tempdir()
   cfg <- list(
-    paths  = list(warehouse  = file.path(tmp, "wh.duckdb"),
-                  schema_sql = system.file("sql", "schema.sql", package = "resourcetracker"),
-                  logs       = file.path(tmp, "logs")),
+    paths  = list(warehouse_dir = file.path(tmp, "warehouse"),
+                  logs          = file.path(tmp, "logs")),
     sample = list(train_end = "2023-12-31"),
     logging = list(level = "WARN")
   )
@@ -43,9 +42,8 @@ test_that("detect_anomalies flags an injected spike", {
 test_that("detect_anomalies handles empty input", {
   tmp <- withr::local_tempdir()
   cfg <- list(
-    paths  = list(warehouse  = file.path(tmp, "wh.duckdb"),
-                  schema_sql = system.file("sql", "schema.sql", package = "resourcetracker"),
-                  logs       = file.path(tmp, "logs")),
+    paths  = list(warehouse_dir = file.path(tmp, "warehouse"),
+                  logs          = file.path(tmp, "logs")),
     sample = list(train_end = "2023-12-31"),
     logging = list(level = "WARN")
   )

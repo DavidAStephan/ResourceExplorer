@@ -48,8 +48,7 @@ with_cache <- function(cfg, source, key, fetcher) {
       # Defensive: a stale file appender can itself error. Swallow so
       # the fallback path below still runs.
       tryCatch(
-        logger::log_warn("[{source}/{key}] fetch failed: {conditionMessage(e)}",
-                         namespace = "resourcetracker"),
+        log_warn("[%s/%s] fetch failed: %s", source, key, conditionMessage(e)),
         error = function(e2) NULL
       )
       NULL
@@ -68,8 +67,7 @@ with_cache <- function(cfg, source, key, fetcher) {
                  source, key), call. = FALSE)
   }
   tryCatch(
-    logger::log_warn("[{source}/{key}] using STALE cache",
-                     namespace = "resourcetracker"),
+    log_warn("[%s/%s] using STALE cache", source, key),
     error = function(e2) NULL
   )
   attr(cached, "cache_status") <- "stale"

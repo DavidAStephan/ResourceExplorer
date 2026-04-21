@@ -36,18 +36,10 @@ fetch_abs_5368 <- function(cfg, db_ready) {
 
   result <- parse_abs_5368(raw, cfg)
 
-  con <- warehouse_connect(cfg)
-  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
-  DBI::dbExecute(con, "DELETE FROM raw.abs_5368_monthly")
-  if (nrow(result) > 0) {
-    DBI::dbWriteTable(con,
-                      DBI::Id(schema = "raw", table = "abs_5368_monthly"),
-                      result, append = TRUE)
-  }
+  wh_write("raw_abs_5368_monthly", result, cfg)
 
   log_ingest_run(cfg, "abs_5368", started, nrow(result), status)
-  logger::log_info("fetch_abs_5368 -- {nrow(result)} rows ({status})",
-                   namespace = "resourcetracker")
+  log_info("fetch_abs_5368 -- %d rows (%s)", nrow(result), status)
   result
 }
 
@@ -109,18 +101,10 @@ fetch_abs_5302 <- function(cfg, db_ready) {
 
   result <- parse_abs_5302(raw)
 
-  con <- warehouse_connect(cfg)
-  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
-  DBI::dbExecute(con, "DELETE FROM raw.abs_5302_quarterly")
-  if (nrow(result) > 0) {
-    DBI::dbWriteTable(con,
-                      DBI::Id(schema = "raw", table = "abs_5302_quarterly"),
-                      result, append = TRUE)
-  }
+  wh_write("raw_abs_5302_quarterly", result, cfg)
 
   log_ingest_run(cfg, "abs_5302", started, nrow(result), status)
-  logger::log_info("fetch_abs_5302 -- {nrow(result)} rows ({status})",
-                   namespace = "resourcetracker")
+  log_info("fetch_abs_5302 -- %d rows (%s)", nrow(result), status)
   result
 }
 
