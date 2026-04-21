@@ -1,9 +1,8 @@
 setup_cfg <- function() {
   tmp <- withr::local_tempdir(.local_envir = parent.frame(2))
   cfg <- list(
-    paths  = list(warehouse  = file.path(tmp, "wh.duckdb"),
-                  schema_sql = system.file("sql", "schema.sql", package = "resourcetracker"),
-                  logs       = file.path(tmp, "logs")),
+    paths  = list(warehouse_dir = file.path(tmp, "warehouse"),
+                  logs          = file.path(tmp, "logs")),
     logging = list(level = "WARN")
   )
   init_logger(cfg); warehouse_init_schema(cfg)

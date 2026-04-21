@@ -46,8 +46,7 @@ backtest_rmse <- function(features, abs_5302, cfg) {
   valid_quarters <- actuals$quarter_end[actuals$quarter_end >= valid_start]
 
   if (length(valid_quarters) == 0) {
-    logger::log_warn("backtest_rmse: no validation quarters available",
-                     namespace = "resourcetracker")
+    log_warn("backtest_rmse: no validation quarters available")
     return(tibble::tibble(
       quarter_end    = as.Date(character()),
       actual         = double(),
@@ -62,11 +61,11 @@ backtest_rmse <- function(features, abs_5302, cfg) {
     backtest_one_quarter(q, features, actuals, deflators, cfg)
   })
 
-  logger::log_info(
-    "backtest_rmse: {nrow(out)} quarters; ",
-    "RMSE={round(sqrt(mean(out$err^2, na.rm=TRUE)), 2)} ",
-    "naive={round(sqrt(mean(out$err_naive^2, na.rm=TRUE)), 2)}",
-    namespace = "resourcetracker"
+  log_info(
+    "backtest_rmse: %d quarters; RMSE=%.2f naive=%.2f",
+    nrow(out),
+    sqrt(mean(out$err^2, na.rm = TRUE)),
+    sqrt(mean(out$err_naive^2, na.rm = TRUE))
   )
   out
 }

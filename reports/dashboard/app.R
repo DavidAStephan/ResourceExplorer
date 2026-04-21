@@ -1,37 +1,35 @@
-## resourcetracker — local Shiny dashboard
+## resourcetracker -- local Shiny dashboard
 ##
-## Reads from outputs/*.csv and the DuckDB warehouse. Run from the repo
-## root with:
+## Reads from outputs/*.csv and the rds-backed warehouse under
+## data/warehouse/. Run from the repo root with:
 ##   shiny::runApp("reports/dashboard")
-## No deployment — local only.
+## No deployment -- local only.
+##
+## Previous version used DuckDB via DBI + duckdb; replaced with plain
+## readRDS because those packages are not on the work-laptop allow-list.
 
 library(shiny)
 library(dplyr)
 library(readr)
 library(ggplot2)
-library(DBI)
-library(duckdb)
 library(fs)
 
-OUTPUTS   <- path("..", "..", "outputs")
-WAREHOUSE <- path("..", "..", "data", "warehouse.duckdb")
+OUTPUTS     <- path("..", "..", "outputs")
+WH_DIR      <- path("..", "..", "data", "warehouse")
 
 safe_read <- function(p) {
   if (!file_exists(p)) return(tibble())
   suppressMessages(read_csv(p, show_col_types = FALSE))
 }
 
-pull_wh <- function(sql) {
-  if (!file_exists(WAREHOUSE)) return(tibble())
-  con <- tryCatch(dbConnect(duckdb(), dbdir = WAREHOUSE, read_only = TRUE),
-                  error = function(e) NULL)
-  if (is.null(con)) return(tibble())
-  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
-  tryCatch(as_tibble(dbGetQuery(con, sql)), error = function(e) tibble())
+wh_table <- function(name) {
+  p <- path(WH_DIR, paste0(name, ".rds"))
+  if (!file_exists(p)) return(tibble())
+  tryCatch(tibble::as_tibble(readRDS(p)), error = function(e) tibble())
 }
 
 ui <- fluidPage(
-  titlePanel("resourcetracker — Australian real goods nowcast"),
+  titlePanel("resourcetracker -- Australian real goods nowcast"),
   tabsetPanel(
     tabPanel("Nowcast",
       fluidRow(
@@ -66,9 +64,10 @@ ui <- fluidPage(
 server <- function(input, output, session) {
 
   # ---- Nowcast tab ----
-  history <- reactive(pull_wh(
-    "SELECT * FROM mart.nowcast_history ORDER BY run_timestamp"
-  ))
+  history <- reactive(
+    wh_table("mart_nowcast_history") |>
+      arrange(run_timestamp)
+  )
   current <- reactive(safe_read(path(OUTPUTS, "nowcast_current.csv")))
 
   output$nowcast_plot <- renderPlot({
@@ -160,7 +159,7 @@ server <- function(input, output, session) {
       geom_col() +
       geom_hline(yintercept = 0.7, linetype = 2, colour = "red") +
       labs(x = NULL, y = "RMSE vs seasonal-random-walk",
-           subtitle = "Target: ≤ 0.70 (30% below naive)") +
+           subtitle = "Target: <= 0.70 (30% below naive)") +
       theme_minimal()
   })
 }

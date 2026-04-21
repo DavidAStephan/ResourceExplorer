@@ -2,9 +2,9 @@ test_that("load_sitc_crosswalk writes all configured commodities", {
   tmp <- withr::local_tempdir()
   cfg <- list(
     paths = list(
-      warehouse      = file.path(tmp, "wh.duckdb"),
-      schema_sql     = system.file("sql", "schema.sql", package = "resourcetracker"),
-      sitc_crosswalk = system.file("extdata", "sitc_crosswalk.csv", package = "resourcetracker"),
+      warehouse_dir  = file.path(tmp, "warehouse"),
+      sitc_crosswalk = testthat::test_path("..", "..", "inst", "extdata",
+                                            "sitc_crosswalk.csv"),
       logs           = file.path(tmp, "logs")
     ),
     commodities = c("iron_ore", "coal", "lng", "other"),
@@ -31,8 +31,7 @@ test_that("load_sitc_crosswalk errors if a required commodity is missing", {
 
   cfg <- list(
     paths = list(
-      warehouse      = file.path(tmp, "wh.duckdb"),
-      schema_sql     = system.file("sql", "schema.sql", package = "resourcetracker"),
+      warehouse_dir  = file.path(tmp, "warehouse"),
       sitc_crosswalk = csv,
       logs           = file.path(tmp, "logs")
     ),

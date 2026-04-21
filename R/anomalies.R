@@ -77,21 +77,14 @@ detect_anomalies <- function(portwatch, cfg,
                      sd          = .data$sd,
                      z_score     = .data$z_score)
 
-  tryCatch({
-    con <- warehouse_connect(cfg)
-    on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
-    DBI::dbExecute(con, "DELETE FROM mart.latest_anomalies")
-    if (nrow(out) > 0) {
-      out_db <- dplyr::mutate(out, detected_at = Sys.time())
-      DBI::dbWriteTable(
-        con, DBI::Id(schema = "mart", table = "latest_anomalies"),
-        out_db, append = TRUE
-      )
+  tryCatch(
+    wh_write("mart_latest_anomalies",
+             dplyr::mutate(out, detected_at = Sys.time()),
+             cfg),
+    error = function(e) {
+      log_warn("anomaly warehouse write failed: %s", conditionMessage(e))
     }
-  }, error = function(e) {
-    logger::log_warn("anomaly warehouse write failed: {conditionMessage(e)}",
-                     namespace = "resourcetracker")
-  })
+  )
 
   out
 }

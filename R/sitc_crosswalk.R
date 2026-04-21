@@ -26,15 +26,9 @@ load_sitc_crosswalk <- function(cfg) {
          paste(missing_commodities, collapse = ", "), call. = FALSE)
   }
 
-  con <- warehouse_connect(cfg)
-  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
-  DBI::dbExecute(con, "DELETE FROM mart.crosswalk_sitc")
-  DBI::dbWriteTable(con,
-                    DBI::Id(schema = "mart", table = "crosswalk_sitc"),
-                    xw, append = TRUE)
+  wh_write("mart_crosswalk_sitc", xw, cfg)
 
-  logger::log_info("load_sitc_crosswalk -- {nrow(xw)} rows",
-                   namespace = "resourcetracker")
+  log_info("load_sitc_crosswalk -- %d rows", nrow(xw))
   xw
 }
 

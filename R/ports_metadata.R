@@ -26,15 +26,8 @@ load_ports_metadata <- function(cfg) {
     )
   )
 
-  con <- warehouse_connect(cfg)
-  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
-  DBI::dbExecute(con, "DELETE FROM mart.dim_port")
-  if (nrow(meta) > 0) {
-    DBI::dbWriteTable(con, DBI::Id(schema = "mart", table = "dim_port"),
-                      meta, append = TRUE)
-  }
+  wh_write("mart_dim_port", meta, cfg)
 
-  logger::log_info("load_ports_metadata -- {nrow(meta)} rows",
-                   namespace = "resourcetracker")
+  log_info("load_ports_metadata -- %d rows", nrow(meta))
   meta
 }

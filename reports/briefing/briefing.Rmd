@@ -1,59 +1,50 @@
 ---
 title: "Australian Real Goods Nowcast — Briefing"
 subtitle: "resourcetracker · weekly run"
-date: today
-format:
-  html:
+date: "`r Sys.Date()`"
+output:
+  html_document:
     toc: true
-    self-contained: true
+    self_contained: true
     theme: cosmo
-  pdf:
-    toc: true
-    geometry: margin=1in
-execute:
-  echo: false
-  warning: false
-  message: false
 params:
   outputs_dir: "../../outputs"
-  warehouse:  "../../data/warehouse.duckdb"
+  warehouse_dir: "../../data/warehouse"
 ---
 
-```{r setup}
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 library(dplyr)
 library(readr)
 library(ggplot2)
 library(fs)
-library(DBI)
-library(duckdb)
 
-outputs  <- params$outputs_dir
-wh_path  <- params$warehouse
+outputs <- params$outputs_dir
+wh_dir  <- params$warehouse_dir
 
-nowcast    <- read_csv(path(outputs, "nowcast_current.csv"),
-                       show_col_types = FALSE)
-tonnage    <- read_csv(path(outputs, "tonnage_monthly.csv"),
-                       show_col_types = FALSE)
-diag_fit   <- read_csv(path(outputs, "bridge_diagnostics.csv"),
-                       show_col_types = FALSE)
-
-con <- tryCatch(
-  dbConnect(duckdb(), dbdir = wh_path, read_only = TRUE),
-  error = function(e) NULL
-)
-
-pull_safely <- function(sql) {
-  if (is.null(con)) return(tibble())
-  tryCatch(as_tibble(dbGetQuery(con, sql)), error = function(e) tibble())
+safe_read_csv <- function(p) {
+  if (!file_exists(p)) return(tibble())
+  suppressMessages(read_csv(p, show_col_types = FALSE))
 }
 
-history   <- pull_safely("SELECT * FROM mart.nowcast_history ORDER BY run_timestamp")
-abs_5302  <- pull_safely("SELECT * FROM raw.abs_5302_quarterly ORDER BY quarter_end")
+safe_read_wh <- function(name) {
+  p <- path(wh_dir, paste0(name, ".rds"))
+  if (!file_exists(p)) return(tibble())
+  tibble::as_tibble(readRDS(p))
+}
+
+nowcast  <- safe_read_csv(path(outputs, "nowcast_current.csv"))
+tonnage  <- safe_read_csv(path(outputs, "tonnage_monthly.csv"))
+diag_fit <- safe_read_csv(path(outputs, "bridge_diagnostics.csv"))
+
+history  <- safe_read_wh("mart_nowcast_history")
+abs_5302 <- safe_read_wh("raw_abs_5302_quarterly")
+anoms    <- safe_read_wh("mart_latest_anomalies")
 ```
 
 ## Headline nowcast
 
-```{r headline}
+```{r headline, results='asis'}
 if (nrow(nowcast) == 0 || is.na(nowcast$point_estimate[1])) {
   cat("*No nowcast available this run.*")
 } else {
@@ -107,8 +98,9 @@ if (nrow(tonnage) > 0) {
 
 ```{r delta}
 if (nrow(history) >= 2) {
-  current <- history[nrow(history), ]
-  prev    <- history[nrow(history) - 1, ]
+  ordered <- history[order(history$run_timestamp), ]
+  current <- ordered[nrow(ordered), ]
+  prev    <- ordered[nrow(ordered) - 1, ]
   tibble(
     metric = c("Point estimate", "80% lower", "80% upper",
                "95% lower", "95% upper", "Share observed"),
@@ -125,13 +117,13 @@ if (nrow(history) >= 2) {
   ) |>
     knitr::kable(digits = c(NA, 1, 1, 1))
 } else {
-  cat("*First run this quarter — no prior run to compare against.*")
+  cat("*First run this quarter -- no prior run to compare against.*")
 }
 ```
 
 ## Comparison to ABS latest actual
 
-```{r abs-compare}
+```{r abs-compare, results='asis'}
 if (nrow(abs_5302) > 0) {
   latest_abs <- abs_5302 |>
     filter(!is.na(value_chainvol_aud_m), value_chainvol_aud_m > 0) |>
@@ -151,13 +143,12 @@ if (nrow(abs_5302) > 0) {
 ## Flagged anomalies
 
 ```{r anomalies-table}
-anoms <- pull_safely(
-  "SELECT obs_date, port_id, commodity, tonnage, z_score
-   FROM mart.latest_anomalies
-   ORDER BY ABS(z_score) DESC LIMIT 10"
-)
 if (nrow(anoms) > 0) {
-  knitr::kable(anoms, digits = c(NA, NA, NA, 0, 2))
+  anoms |>
+    arrange(desc(abs(z_score))) |>
+    slice_head(n = 10) |>
+    select(obs_date, port_id, commodity, tonnage, z_score) |>
+    knitr::kable(digits = c(NA, NA, NA, 0, 2))
 } else {
   cat("*No >2σ departures flagged in the last 28 days.*")
 }
@@ -169,12 +160,9 @@ Bridge regression per commodity on log levels with an AR(1) lag:
 
 $$\log y_{c,m} = \beta_0 + \beta_1 \log T^{SA}_{c,m} + \beta_2 \log P_{c,m} + \beta_3 \log y_{c,m-1} + \varepsilon_{c,m}$$
 
-Fit on 2019-01 → 2023-12; validated on 2024+. Newey-West SEs, lag 3.
+Fit on 2019-01 → 2023-12; validated on 2024+. Newey-West (Bartlett) SEs
+with lag 3. Seasonal adjustment via `stats::stl()` (periodic, robust).
 Quarterly aggregate converted to chain-volume via the ABS 5302.0
 implicit deflator (trailing 4-quarter mean as forecast). Uncertainty
 bands via 1,000 bootstrap draws of bridge residuals, scaled by
 $\sqrt{1 - \text{share\_observed}}$.
-
-```{r close-con}
-if (!is.null(con)) dbDisconnect(con, shutdown = TRUE)
-```

@@ -31,16 +31,11 @@ log_ingest_run <- function(cfg, source, started_at,
       status        = status,
       error_message = error_message
     )
-    con <- warehouse_connect(cfg)
-    on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
-    DBI::dbWriteTable(con,
-                      DBI::Id(schema = "mart", table = "ingest_runs"),
-                      row, append = TRUE)
+    wh_append("mart_ingest_runs", row, cfg, keys = "run_id")
     invisible(run_id)
   },
   error = function(e) {
-    logger::log_warn("log_ingest_run swallowed error: {conditionMessage(e)}",
-                     namespace = "resourcetracker")
+    log_warn("log_ingest_run swallowed error: %s", conditionMessage(e))
     invisible(NA_character_)
   })
 }

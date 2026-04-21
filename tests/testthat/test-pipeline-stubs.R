@@ -2,10 +2,11 @@ test_that("pipeline runs end-to-end with all caches primed (integration)", {
   tmp <- withr::local_tempdir()
   cfg <- list(
     paths = list(
-      warehouse      = file.path(tmp, "wh.duckdb"),
-      schema_sql     = system.file("sql", "schema.sql", package = "resourcetracker"),
-      ports_metadata = system.file("extdata", "ports_metadata.csv", package = "resourcetracker"),
-      sitc_crosswalk = system.file("extdata", "sitc_crosswalk.csv", package = "resourcetracker"),
+      warehouse_dir  = file.path(tmp, "warehouse"),
+      ports_metadata = testthat::test_path("..", "..", "inst", "extdata",
+                                            "ports_metadata.csv"),
+      sitc_crosswalk = testthat::test_path("..", "..", "inst", "extdata",
+                                            "sitc_crosswalk.csv"),
       cache          = file.path(tmp, "cache"),
       outputs        = file.path(tmp, "outputs"),
       logs           = file.path(tmp, "logs")
@@ -57,10 +58,10 @@ test_that("pipeline runs end-to-end with all caches primed (integration)", {
   ))
 
   withr::with_envvar(c(FRED_API_KEY = ""), {
-    pw    <- fetch_portwatch_tonnage(cfg, cfg$paths$warehouse)
-    a5368 <- fetch_abs_5368(cfg, cfg$paths$warehouse)
-    a5302 <- fetch_abs_5302(cfg, cfg$paths$warehouse)
-    fr    <- fetch_fred_prices(cfg, cfg$paths$warehouse)
+    pw    <- fetch_portwatch_tonnage(cfg, cfg$paths$warehouse_dir)
+    a5368 <- fetch_abs_5368(cfg, cfg$paths$warehouse_dir)
+    a5302 <- fetch_abs_5302(cfg, cfg$paths$warehouse_dir)
+    fr    <- fetch_fred_prices(cfg, cfg$paths$warehouse_dir)
   })
 
   feats <- build_features(pw, a5368, fr, ports_meta, sitc_crosswalk, cfg)

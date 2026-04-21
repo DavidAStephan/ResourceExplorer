@@ -55,10 +55,7 @@ fit_bridge <- function(features, cfg) {
       dplyr::arrange(.data$month_end)
 
     if (nrow(dat) < 24) {
-      logger::log_warn(
-        "fit_bridge[{com}]: {nrow(dat)} obs < 24 -- skipping",
-        namespace = "resourcetracker"
-      )
+      log_warn("fit_bridge[%s]: %d obs < 24 -- skipping", com, nrow(dat))
       fits[[com]] <- NULL
       next
     }
@@ -67,7 +64,7 @@ fit_bridge <- function(features, cfg) {
       log_y ~ log_tonnage_sa + log_price + log_y_lag1,
       data = dat
     )
-    vcov_hac <- sandwich::NeweyWest(fit, lag = 3L, prewhite = FALSE)
+    vcov_hac <- nw_vcov(fit, lag = 3L, prewhite = FALSE)
     res <- stats::residuals(fit)
     yhat <- stats::fitted(fit)
 
@@ -81,10 +78,9 @@ fit_bridge <- function(features, cfg) {
       beta_tonnage_se = sqrt(vcov_hac["log_tonnage_sa", "log_tonnage_sa"])
     )
 
-    logger::log_info(
-      "fit_bridge[{com}]: n={nrow(dat)} R^2={round(diag$r_squared, 3)} ",
-      "RMSE_train={round(diag$rmse_train, 3)} beta_T={round(diag$beta_tonnage, 3)}",
-      namespace = "resourcetracker"
+    log_info(
+      "fit_bridge[%s]: n=%d R^2=%.3f RMSE_train=%.3f beta_T=%.3f",
+      com, nrow(dat), diag$r_squared, diag$rmse_train, diag$beta_tonnage
     )
 
     fits[[com]] <- list(

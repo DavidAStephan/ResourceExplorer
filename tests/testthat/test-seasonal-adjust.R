@@ -1,7 +1,4 @@
 test_that("x13_adjust returns value_sa for a 5-year monthly series", {
-  skip_if_not_installed("seasonal")
-  skip_on_cran()
-
   n <- 60
   month_end <- seq(as.Date("2018-01-01"), by = "month", length.out = n)
   month_end <- lubridate::ceiling_date(month_end, "month") - 1

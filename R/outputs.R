@@ -54,56 +54,47 @@ write_csv_outputs <- function(nowcast_current, portwatch, bridge_fits,
     )
   readr::write_csv(diagnostics, paths[["bridge_diagnostics"]])
 
-  logger::log_info("write_csv_outputs -- wrote {length(paths)} files to {out}",
-                   namespace = "resourcetracker")
+  log_info("write_csv_outputs -- wrote %d files to %s", length(paths), out)
   invisible(paths)
 }
 
-#' Render the Quarto briefing to HTML + PDF
+#' Render the briefing to HTML via rmarkdown
 #'
-#' Calls `quarto::quarto_render()` with explicit parameters so the
-#' briefing reads from the configured `outputs/` and `warehouse`. Both
-#' HTML and PDF are rendered into the briefing directory next to the
-#' source `.qmd`. If Quarto isn't installed, logs a warning and returns
-#' the `.qmd` path -- the pipeline doesn't fail just because of a local
-#' Quarto gap.
+#' Calls `rmarkdown::render()` with explicit params so the briefing reads
+#' from the configured `outputs/` and warehouse directories. HTML only;
+#' the previous quarto-rendered PDF path was dropped because `{quarto}`
+#' and the quarto CLI are not on the work-laptop allow-list.
 #'
-#' @param qmd_path Path to the `briefing.qmd` source.
+#' @param rmd_path Path to the `briefing.Rmd` source.
 #' @param nowcast_current Dependency object (triggers rebuild).
 #' @param csv_exports Dependency object.
 #' @param cfg Config list.
 #' @return Character vector of rendered output paths, invisibly.
 #' @export
-render_briefing <- function(qmd_path, nowcast_current, csv_exports, cfg) {
-  if (!nzchar(Sys.which("quarto"))) {
-    logger::log_warn("quarto binary not found on PATH -- skipping render",
-                     namespace = "resourcetracker")
-    return(invisible(qmd_path))
-  }
-
+render_briefing <- function(rmd_path, nowcast_current, csv_exports, cfg) {
   params <- list(
-    outputs_dir = fs::path_abs(cfg$paths$outputs),
-    warehouse   = fs::path_abs(cfg$paths$warehouse)
+    outputs_dir   = fs::path_abs(cfg$paths$outputs),
+    warehouse_dir = fs::path_abs(cfg$paths$warehouse_dir %||% "data/warehouse")
   )
 
-  html_path <- fs::path(fs::path_dir(qmd_path), "briefing.html")
-  pdf_path  <- fs::path(fs::path_dir(qmd_path), "briefing.pdf")
+  html_path <- fs::path(fs::path_dir(rmd_path), "briefing.html")
 
   result <- tryCatch({
-    quarto::quarto_render(
-      input          = qmd_path,
-      execute_params = params,
-      quiet          = TRUE
+    rmarkdown::render(
+      input         = rmd_path,
+      output_file   = "briefing.html",
+      output_format = "html_document",
+      params        = params,
+      quiet         = TRUE,
+      envir         = new.env(parent = globalenv())
     )
-    c(html_path, pdf_path)
+    html_path
   },
   error = function(e) {
-    logger::log_warn("quarto render failed: {conditionMessage(e)}",
-                     namespace = "resourcetracker")
-    qmd_path
+    log_warn("briefing render failed: %s", conditionMessage(e))
+    rmd_path
   })
 
-  logger::log_info("render_briefing -- {length(result)} file(s)",
-                   namespace = "resourcetracker")
+  log_info("render_briefing -- %d file(s)", length(result))
   invisible(result)
 }

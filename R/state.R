@@ -10,8 +10,7 @@
 #' @export
 save_nowcast_run <- function(cfg, nowcast_row) {
   if (nrow(nowcast_row) == 0) {
-    logger::log_warn("save_nowcast_run: empty input, skipping",
-                     namespace = "resourcetracker")
+    log_warn("save_nowcast_run: empty input, skipping")
     return(invisible(nowcast_row))
   }
 
@@ -26,11 +25,8 @@ save_nowcast_run <- function(cfg, nowcast_row) {
     share_observed = nowcast_row$share_observed[1]
   )
 
-  con <- warehouse_connect(cfg)
-  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
-  DBI::dbWriteTable(con,
-                    DBI::Id(schema = "mart", table = "nowcast_history"),
-                    row, append = TRUE)
+  wh_append("mart_nowcast_history", row, cfg,
+            keys = c("run_timestamp", "quarter_end"))
   invisible(row)
 }
 
@@ -43,14 +39,12 @@ save_nowcast_run <- function(cfg, nowcast_row) {
 #' @export
 last_nowcast_run <- function(cfg, current_quarter,
                              exclude_run_timestamp = NULL) {
-  con <- warehouse_connect(cfg, read_only = TRUE)
-  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  hist <- wh_read("mart_nowcast_history", cfg)
+  if (is.null(hist) || nrow(hist) == 0) return(NULL)
 
-  sql <- "SELECT * FROM mart.nowcast_history
-          WHERE quarter_end = ?
-          ORDER BY run_timestamp DESC"
-  rows <- DBI::dbGetQuery(con, sql,
-                          params = list(format(current_quarter, "%Y-%m-%d")))
+  rows <- hist |>
+    dplyr::filter(.data$quarter_end == as.Date(current_quarter)) |>
+    dplyr::arrange(dplyr::desc(.data$run_timestamp))
 
   if (!is.null(exclude_run_timestamp)) {
     rows <- rows[rows$run_timestamp != exclude_run_timestamp, , drop = FALSE]
