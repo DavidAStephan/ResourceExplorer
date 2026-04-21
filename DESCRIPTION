@@ -1,30 +1,29 @@
 Package: resourcetracker
 Type: Package
-Title: Nowcasting Australian Real Goods Exports from AIS Shipping Data
+Title: Nowcasting Australian Mining Export Volumes from AIS Shipping Data
 Version: 0.0.0.9000
 Authors@R:
     person("David", "Stephan", email = "david.stephan@gmail.com", role = c("aut", "cre"))
 Description:
-    Running-nowcast of ABS 5302.0 quarterly real goods credits using IMF
-    PortWatch AIS tonnage, ABS 5368.0 monthly trade values, and FRED
-    commodity prices. Bridge regressions per commodity (iron ore, coal,
-    LNG, other) feed a quarterly aggregate with bootstrap uncertainty
-    bands that shrink as the quarter is observed.
+    Per-commodity quarterly physical-tonnage nowcasts of Australian iron
+    ore and coal exports. Bridge regressions per commodity using IMF
+    PortWatch AIS daily tonnage as the high-frequency RHS indicator and
+    DISR Resources and Energy Quarterly Table 16 as the tonnage target.
 License: file LICENSE
 Encoding: UTF-8
 LazyData: true
 Depends:
     R (>= 4.2)
 Imports:
+    curl,
     dplyr,
-    fredr,
     fs,
     httr2,
     jsonlite,
     lubridate,
     purrr,
-    readabs,
     readr,
+    readxl,
     rlang,
     rmarkdown,
     stringr,
@@ -36,7 +35,6 @@ Suggests:
     lintr,
     shiny,
     testthat (>= 3.0.0),
-    tsibble,
     withr
 Config/testthat/edition: 3
 Roxygen: list(markdown = TRUE)

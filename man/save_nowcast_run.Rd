@@ -2,20 +2,20 @@
 % Please edit documentation in R/state.R
 \name{save_nowcast_run}
 \alias{save_nowcast_run}
-\title{Persist a nowcast run to \code{mart.nowcast_history}}
+\title{Persist a nowcast run to \code{mart_nowcast_history}}
 \usage{
-save_nowcast_run(cfg, nowcast_row)
+save_nowcast_run(cfg, nowcast_rows)
 }
 \arguments{
 \item{cfg}{Config list.}
 
-\item{nowcast_row}{One-row tibble from \code{\link[=run_nowcast]{run_nowcast()}}.}
+\item{nowcast_rows}{Tibble from \code{\link[=run_nowcast]{run_nowcast()}} (one row per commodity).}
 }
 \value{
-Invisibly, the inserted row.
+Invisibly, the inserted rows.
 }
 \description{
-Append-only audit log. One row per \code{tar_make()}. The previous run's
-row is fetched by \code{\link[=last_nowcast_run]{last_nowcast_run()}} to compute "change since last
-run" for the briefing.
+Append-only audit log. One row per (run, commodity) combination —
+the \code{run_nowcast()} output now has one row per commodity, so each
+pipeline run writes \code{length(commodities)} rows.
 }

@@ -38,13 +38,11 @@ extrapolate_quarter_tonnage <- function(portwatch, ports_meta, cfg,
     ))
   }
 
-  daily <- portwatch |>
-    dplyr::left_join(
-      dplyr::select(ports_meta, port_id, commodity_class),
-      by = "port_id"
-    ) |>
-    dplyr::mutate(commodity = .data$commodity_class) |>
-    dplyr::filter(!is.na(.data$commodity))
+  # `portwatch` already carries a `commodity` column from
+  # derive_portwatch_commodity_rows(); no port_id-based join needed.
+  # `ports_meta` is kept in the signature for backwards compatibility but
+  # unused here.
+  daily <- dplyr::filter(portwatch, !is.na(.data$commodity))
 
   commodities <- cfg$commodities
   train_end <- as.Date(cfg$sample$train_end %||% "2023-12-31")
@@ -52,10 +50,8 @@ extrapolate_quarter_tonnage <- function(portwatch, ports_meta, cfg,
   purrr::map_dfr(commodities, function(com) {
     com_daily <- dplyr::filter(daily, .data$commodity == com)
     if (com == "other") {
-      # "other" tonnage is total across all ports -- approximated here as
-      # the sum of everything on the panel that has no specific commodity
-      # mapping. Upgrade when the ABS total-goods pull is wired.
-      com_daily <- daily
+      # "other" already routes the residual vessel types via the
+      # derivation rules in ingest_portwatch.R; nothing extra to do here.
     }
 
     seasonal_norm <- seasonal_monthly_norm(com_daily)

@@ -1,109 +1,102 @@
-#' STL-based seasonal adjustment for a single monthly series
+#' STL-based quarterly seasonal adjustment for a single series
 #'
-#' Wraps `stats::stl()` with `s.window = "periodic"` and `robust = TRUE`.
-#' Accepts a long tibble (`month_end`, `value`), returns the same tibble
-#' with a `value_sa` column. Handles the awkward corners:
+#' Wraps `stats::stl()` with `s.window = "periodic"` and `robust = TRUE`,
+#' frequency = 4 (quarters per year). Accepts a long tibble with columns
+#' `quarter_end` (Date, last day of quarter) and `value` (numeric),
+#' returns the same tibble with a `value_sa` column.
 #'
-#' - **Short series** (< 36 monthly observations). STL needs at least two
-#'   full seasonal cycles; with <36 months the pattern isn't identified.
-#'   Fall back to `value_sa = value` and log a warning.
-#' - **Non-positive values**. Multiplicative adjustment requires logs of
-#'   positive values. If any value <= 0 we switch to additive
-#'   (subtract the STL seasonal component).
-#' - **Gaps**. STL needs a regular `ts`. We reindex to a full monthly grid
-#'   and linearly interpolate single-month gaps; longer NA runs carry
-#'   through unchanged.
+#' Handles the awkward corners:
 #'
-#' Replaced `seasonal::seas()` (X-13-ARIMA-SEATS) because the `{seasonal}`
-#' package and its x13 Fortran binary are not on the work-laptop
-#' allow-list. STL loses X-13's calendar and trading-day adjustments;
-#' acceptable for Phase 2. If residual-seasonality diagnostics flag it
-#' later, add a working-days-per-month regressor upstream.
+#' - **Short series** (< 8 quarterly observations = 2 full cycles). STL
+#'   needs at least two periods to identify the seasonal. Fall back to
+#'   `value_sa = value` and log a warning.
+#' - **Non-positive values.** Multiplicative adjustment requires logs of
+#'   positive values. If any `value <= 0` we switch to additive.
+#' - **Gaps.** STL needs a regular `ts`. We reindex to a full quarterly
+#'   grid and linearly interpolate single-quarter gaps.
 #'
-#' @param df Tibble with `month_end` (Date, first or last of month) and
-#'   `value` (numeric).
-#' @param force_additive If `TRUE`, skip the positivity check and use
+#' Replaced X-13-ARIMA-SEATS (`{seasonal}`) because its Fortran binary is
+#' not on the work-laptop allow-list. STL loses X-13's calendar /
+#' trading-day adjustments, but at quarterly frequency and for bulk
+#' commodity tonnage the trading-day signal is tiny.
+#'
+#' @param df Tibble with `quarter_end` (Date) and `value` (numeric).
+#' @param force_additive If `TRUE`, skip positivity check and use
 #'   additive decomposition unconditionally.
 #' @return The input tibble with an added `value_sa` numeric column.
 #' @export
-x13_adjust <- function(df, force_additive = FALSE) {
-  stopifnot(all(c("month_end", "value") %in% names(df)))
+stl_quarterly_adjust <- function(df, force_additive = FALSE) {
+  stopifnot(all(c("quarter_end", "value") %in% names(df)))
   if (nrow(df) == 0) {
     return(dplyr::mutate(df, value_sa = double()))
   }
 
   df <- df |>
-    dplyr::arrange(.data$month_end) |>
+    dplyr::arrange(.data$quarter_end) |>
     dplyr::mutate(value = as.numeric(.data$value))
 
-  first_m <- lubridate::floor_date(min(df$month_end), "month")
-  last_m  <- lubridate::floor_date(max(df$month_end), "month")
-  grid <- tibble::tibble(month_floor = seq(first_m, last_m, by = "month"))
+  first_q <- lubridate::floor_date(min(df$quarter_end), "quarter")
+  last_q  <- lubridate::floor_date(max(df$quarter_end), "quarter")
+  grid <- tibble::tibble(
+    quarter_floor = seq(first_q, last_q, by = "quarter")
+  )
   df <- df |>
-    dplyr::mutate(month_floor = lubridate::floor_date(.data$month_end, "month")) |>
-    dplyr::right_join(grid, by = "month_floor") |>
-    dplyr::arrange(.data$month_floor) |>
     dplyr::mutate(
-      month_end = lubridate::ceiling_date(.data$month_floor, "month") - 1
+      quarter_floor = lubridate::floor_date(.data$quarter_end, "quarter")
+    ) |>
+    dplyr::right_join(grid, by = "quarter_floor") |>
+    dplyr::arrange(.data$quarter_floor) |>
+    dplyr::mutate(
+      quarter_end = lubridate::ceiling_date(.data$quarter_floor, "quarter") - 1
     )
 
-  if (nrow(df) < 36) {
-    log_warn("x13_adjust: %d obs < 36 -- returning original", nrow(df))
+  if (nrow(df) < 8L) {
+    log_warn("stl_quarterly_adjust: %d obs < 8 -- returning original", nrow(df))
     return(dplyr::transmute(df,
-                            month_end = .data$month_end,
-                            value     = .data$value,
-                            value_sa  = .data$value))
+                            quarter_end = .data$quarter_end,
+                            value       = .data$value,
+                            value_sa    = .data$value))
   }
 
   use_additive <- force_additive || any(df$value <= 0, na.rm = TRUE)
 
   sa_values <- tryCatch(
-    .stl_adjust_core(df$value, first_m, use_additive),
+    .stl_adjust_core_quarterly(df$value, first_q, use_additive),
     error = function(e) {
-      log_warn("x13_adjust failed (%s) -- returning original",
+      log_warn("stl_quarterly_adjust failed (%s) -- returning original",
                conditionMessage(e))
       df$value
     }
   )
 
   dplyr::transmute(df,
-                   month_end = .data$month_end,
-                   value     = .data$value,
-                   value_sa  = sa_values)
+                   quarter_end = .data$quarter_end,
+                   value       = .data$value,
+                   value_sa    = sa_values)
 }
 
 #' @keywords internal
-.stl_adjust_core <- function(v, first_m, use_additive) {
-  # STL can't handle NAs; interpolate single-month gaps with a linear
-  # fill, leave longer runs alone (they'll return NA SA values, which is
-  # honest).
+.stl_adjust_core_quarterly <- function(v, first_q, use_additive) {
   v_filled <- .linear_interp(v)
-
   z <- if (use_additive) v_filled else log(v_filled)
 
   ts_obj <- stats::ts(
     z,
-    start     = c(lubridate::year(first_m), lubridate::month(first_m)),
-    frequency = 12
+    start     = c(lubridate::year(first_q), lubridate::quarter(first_q)),
+    frequency = 4
   )
 
   stl_fit <- stats::stl(
     ts_obj,
-    s.window = "periodic",
-    robust   = TRUE,
+    s.window  = "periodic",
+    robust    = TRUE,
     na.action = stats::na.pass
   )
   seas <- as.numeric(stl_fit$time.series[, "seasonal"])
 
-  if (use_additive) {
-    v - seas
-  } else {
-    # log-space deseasonalisation; restore scale
-    v / exp(seas)
-  }
+  if (use_additive) v - seas else v / exp(seas)
 }
 
-#' Linear interpolation of isolated NAs in a numeric vector
 #' @keywords internal
 .linear_interp <- function(v) {
   n <- length(v)

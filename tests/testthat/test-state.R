@@ -9,56 +9,58 @@ setup_cfg <- function() {
   cfg
 }
 
-test_that("save_nowcast_run + last_nowcast_run round-trip", {
-  cfg <- setup_cfg()
-
-  row1 <- tibble::tibble(
-    quarter_end    = as.Date("2026-06-30"),
-    point_estimate = 150000, lower_80 = 148000, upper_80 = 152000,
-    lower_95 = 145000, upper_95 = 155000, share_observed = 0.25,
-    run_timestamp  = as.POSIXct("2026-04-19 10:00:00", tz = "UTC")
+.sample_rows <- function(q = as.Date("2026-06-30"), ts = Sys.time(),
+                         commodities = c("iron_ore","coal")) {
+  tibble::tibble(
+    commodity         = commodities,
+    quarter_end       = q,
+    point_estimate_Mt = c(230.0, 95.0),
+    lower_80          = c(220.0, 90.0),
+    upper_80          = c(240.0, 100.0),
+    lower_95          = c(210.0, 85.0),
+    upper_95          = c(250.0, 105.0),
+    share_observed    = 0.25,
+    run_timestamp     = ts
   )
+}
+
+test_that("save_nowcast_run + last_nowcast_run round-trip per commodity", {
+  cfg <- setup_cfg()
+  row1 <- .sample_rows(ts = as.POSIXct("2026-04-19 10:00:00", tz = "UTC"))
   save_nowcast_run(cfg, row1)
 
   Sys.sleep(0.02)
-  row2 <- row1
-  row2$point_estimate <- 151000
-  row2$run_timestamp  <- as.POSIXct("2026-04-19 11:00:00", tz = "UTC")
+  row2 <- .sample_rows(ts = as.POSIXct("2026-04-19 11:00:00", tz = "UTC"))
+  row2$point_estimate_Mt <- c(232.0, 96.5)
   save_nowcast_run(cfg, row2)
 
-  last <- last_nowcast_run(cfg, as.Date("2026-06-30"))
-  expect_equal(last$point_estimate, 151000)
+  last <- last_nowcast_run(cfg, "iron_ore", as.Date("2026-06-30"))
+  expect_equal(last$point_estimate, 232.0)
 
-  prior <- last_nowcast_run(cfg, as.Date("2026-06-30"),
-                            exclude_run_timestamp = row2$run_timestamp)
-  expect_equal(prior$point_estimate, 150000)
+  prior <- last_nowcast_run(cfg, "iron_ore", as.Date("2026-06-30"),
+                            exclude_run_timestamp = row2$run_timestamp[1])
+  expect_equal(prior$point_estimate, 230.0)
 })
 
 test_that("nowcast_delta returns NULL on first run", {
-  cur <- tibble::tibble(
-    quarter_end = as.Date("2026-06-30"),
-    point_estimate = 150000, lower_80 = 148000, upper_80 = 152000,
-    lower_95 = 145000, upper_95 = 155000, share_observed = 0.25,
-    run_timestamp = Sys.time()
-  )
+  cur <- .sample_rows()[1, ]
   expect_null(nowcast_delta(cur, NULL))
 })
 
 test_that("nowcast_delta computes per-field deltas", {
-  cur <- tibble::tibble(
-    quarter_end = as.Date("2026-06-30"),
-    point_estimate = 151000, lower_80 = 149000, upper_80 = 153000,
-    lower_95 = 146000, upper_95 = 156000, share_observed = 0.26,
-    run_timestamp = as.POSIXct("2026-04-19 11:00:00", tz = "UTC")
-  )
+  cur <- .sample_rows(ts = as.POSIXct("2026-04-19 11:00:00", tz = "UTC"))[1, ]
   prev <- tibble::tibble(
-    quarter_end = as.Date("2026-06-30"),
-    point_estimate = 150000, lower_80 = 148000, upper_80 = 152000,
-    lower_95 = 145000, upper_95 = 155000, share_observed = 0.25,
-    run_timestamp = as.POSIXct("2026-04-19 10:00:00", tz = "UTC")
+    commodity      = "iron_ore",
+    quarter_end    = as.Date("2026-06-30"),
+    point_estimate = 47000,
+    lower_80 = 45000, upper_80 = 49000,
+    lower_95 = 43000, upper_95 = 51000,
+    share_observed = 0.20,
+    run_timestamp  = as.POSIXct("2026-04-19 10:00:00", tz = "UTC")
   )
   d <- nowcast_delta(cur, prev)
   expect_equal(d$delta_point, 1000)
   expect_equal(d$delta_upper_80, 1000)
   expect_equal(d$hours_since, 1)
+  expect_equal(d$commodity, "iron_ore")
 })

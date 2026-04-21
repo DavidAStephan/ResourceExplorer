@@ -10,16 +10,16 @@ predict_bridge(fits, newdata)
 \item{fits}{Output of \code{\link[=fit_bridge]{fit_bridge()}}.}
 
 \item{newdata}{Long feature tibble for the horizon to predict.
-Rows for each commodity must be sorted by \code{month_end} ascending
-and \strong{must include a \code{log_y_lag1} value for the first month}
-(from the last observed actual).}
+Rows per commodity must be sorted by \code{quarter_end} ascending. The
+first row's \code{log_volume_lag1} must be populated (seeded from the
+last observed \code{log_volume} in training).}
 }
 \value{
-Tibble: \code{month_end}, \code{commodity}, \code{yhat_log}, \code{yhat_aud_m}.
+Tibble: \code{quarter_end}, \code{commodity}, \code{yhat_log},
+\code{yhat_volume_aud_m}.
 }
 \description{
-\strong{Recursion matters.} Because \code{log_y_lag1} is on the RHS, a 3-month
-ahead forecast needs the 1- and 2-month-ahead predictions fed back
-in as lags. We iterate month-by-month, overwriting \code{log_y_lag1} in
-each step with the previous step's prediction.
+Because \code{log_volume_lag1} is on the RHS, a 2-quarter-ahead forecast
+uses the 1-quarter-ahead prediction as its lag input. We iterate
+quarter-by-quarter, overwriting \code{log_volume_lag1} at each step.
 }

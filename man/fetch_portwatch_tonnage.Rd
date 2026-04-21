@@ -9,21 +9,32 @@ fetch_portwatch_tonnage(cfg, db_ready)
 \arguments{
 \item{cfg}{Config list.}
 
-\item{db_ready}{Dependency handle from \code{\link[=warehouse_init_schema]{warehouse_init_schema()}}.}
+\item{db_ready}{Dependency handle (unused; kept for signature parity).}
 }
 \value{
-Tibble matching \code{raw.portwatch_tonnage_daily}.
+Tibble: \code{obs_date}, \code{port_id}, \code{commodity}, \code{tonnage},
+\code{vessel_count}, \code{ingested_at}.
 }
 \description{
-Queries the FeatureServer for AUS-flagged (or configured \code{countries})
-port trade rows from \code{cfg$sample$train_start} to \code{Sys.Date()}, paginates
-via \code{resultOffset}, writes to \code{raw.portwatch_tonnage_daily}, and logs a
-row to \code{mart.ingest_runs}. Falls back to the most recent RDS cache on
-any error so the DAG can run offline.
+Queries the IMF PortWatch \code{Daily_Ports_Data} FeatureServer layer for
+AUS-flagged (or configured \code{countries}) rows from
+\code{cfg$sample$train_start} through \code{Sys.Date()}. The real layer delivers
+one row per (port, day) with export tonnage split across vessel-type
+columns (\code{export_dry_bulk}, \code{export_tanker}, \code{export_container},
+\code{export_general_cargo}, \code{export_roro}) and port-call counts.
 }
 \details{
-Field names on the FeatureServer are the IMF's -- we map to our schema:
-\code{ObsDate} -> \code{obs_date}, \code{PortID} (or similar) -> \code{port_id}, etc. The
-exact source field names are confirmed on first live run; the parser
-\code{\link[=parse_portwatch_features]{parse_portwatch_features()}} isolates that concern for testability.
+This function:
+\enumerate{
+\item Paginates via \code{resultOffset}, parsing each page with
+\code{\link[=parse_portwatch_features]{parse_portwatch_features()}} into a wide tibble.
+\item Joins to the port metadata (\code{inst/extdata/ports_metadata.csv}) on
+\code{portname} to attach our commodity class.
+\item Derives commodity rows via \code{\link[=derive_portwatch_commodity_rows]{derive_portwatch_commodity_rows()}} --
+one row per (obs_date, port, commodity) with summed tonnage.
+\item Writes the long tibble to the rds warehouse and appends a row to
+\code{mart_ingest_runs}.
+\item Falls back to the most recent RDS cache on any error so the
+pipeline runs offline.
+}
 }

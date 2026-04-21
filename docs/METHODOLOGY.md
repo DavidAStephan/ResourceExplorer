@@ -37,9 +37,15 @@ Australian 343 exports), and "other" as the residual.
   where published. Re-adjusting introduces unnecessary degrees of
   freedom variance.
 - **RHS (PortWatch tonnage).** Raw daily panel aggregated to monthly
-  then X-13-ARIMA-SEATS via `{seasonal}`. Falls back to the raw
-  series when < 36 monthly observations are available, or when X-13
-  errors (rare — logged as a warning).
+  then seasonally adjusted via `stats::stl()` with `s.window =
+  "periodic"` and `robust = TRUE`. Falls back to the raw series when
+  < 36 monthly observations are available, or when STL errors (rare
+  — logged as a warning). The function keeps the historical name
+  `x13_adjust()` for call-site stability but no longer requires the
+  X-13 binary; see the work-laptop migration note in
+  `R/seasonal_adjust.R`. STL loses X-13's calendar / trading-day
+  adjustments; if residual-seasonality diagnostics flag it, add a
+  working-days-per-month regressor upstream.
 - **RHS (FRED prices).** No seasonal adjustment — commodity prices
   don't carry a strong calendar-month pattern at this grain.
 
@@ -58,7 +64,7 @@ $$
 
 - $y_{c,m}$ — ABS 5368.0 monthly FOB exports for commodity `c`'s
   SITC basket (sum across the commodity's SITC rows).
-- $T^{\text{SA}}_{c,m}$ — X-13-adjusted monthly tonnage from
+- $T^{\text{SA}}_{c,m}$ — STL-adjusted monthly tonnage from
   PortWatch, aggregated across the commodity's ports.
 - $P_{c,m}$ — monthly FRED commodity price.
 - $\varepsilon_{c,m}$ — i.i.d.-in-bootstrap residual.
@@ -72,8 +78,10 @@ the resulting serial correlation and handle it two ways:
 
 1. The AR(1) lag on `log y` absorbs most persistence in the
    conditional-mean fit.
-2. Standard errors are Newey-West / HAC with `lag = 3` via
-   `sandwich::NeweyWest()`.
+2. Standard errors are Newey-West / HAC with `lag = 3` via the local
+   `nw_vcov()` in `R/hac.R` (Bartlett kernel, no pre-whitening;
+   matches `sandwich::NeweyWest(..., prewhite = FALSE)` to machine
+   precision).
 
 **Why AR(1) and not richer dynamics.** With ~60 monthly training
 observations per commodity, the parameter budget is tight. One lag
@@ -199,7 +207,9 @@ the briefing as "departures from seasonal norm".
 
 `cfg$nowcast$seed` (default `20260419`) controls bootstrap draws.
 Fixed seed means identical bands across runs given identical inputs.
-`renv.lock` pins all R package versions. The pipeline writes every
-external fetch to `mart.ingest_runs` with `{run_id, started_at,
-finished_at, rows_written, status}` for an after-the-fact audit
-trail.
+The pipeline writes every external fetch to the `mart_ingest_runs`
+rds table with `{run_id, started_at, finished_at, rows_written,
+status}` for an after-the-fact audit trail. Package dependencies are
+declared in `DESCRIPTION`; the repo does not pin versions via renv
+because the target work-laptop install uses a CRAN-mirror allow-list
+rather than a lockfile.

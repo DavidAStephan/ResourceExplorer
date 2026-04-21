@@ -1,75 +1,80 @@
-#' Persist a nowcast run to `mart.nowcast_history`
+#' Persist a nowcast run to `mart_nowcast_history`
 #'
-#' Append-only audit log. One row per `tar_make()`. The previous run's
-#' row is fetched by [last_nowcast_run()] to compute "change since last
-#' run" for the briefing.
+#' Append-only audit log. One row per (run, commodity) combination —
+#' the `run_nowcast()` output now has one row per commodity, so each
+#' pipeline run writes `length(commodities)` rows.
 #'
 #' @param cfg Config list.
-#' @param nowcast_row One-row tibble from [run_nowcast()].
-#' @return Invisibly, the inserted row.
+#' @param nowcast_rows Tibble from [run_nowcast()] (one row per commodity).
+#' @return Invisibly, the inserted rows.
 #' @export
-save_nowcast_run <- function(cfg, nowcast_row) {
-  if (nrow(nowcast_row) == 0) {
+save_nowcast_run <- function(cfg, nowcast_rows) {
+  if (nrow(nowcast_rows) == 0L) {
     log_warn("save_nowcast_run: empty input, skipping")
-    return(invisible(nowcast_row))
+    return(invisible(nowcast_rows))
   }
 
-  row <- tibble::tibble(
-    run_timestamp  = nowcast_row$run_timestamp[1],
-    quarter_end    = nowcast_row$quarter_end[1],
-    point_estimate = nowcast_row$point_estimate[1],
-    lower_80       = nowcast_row$lower_80[1],
-    upper_80       = nowcast_row$upper_80[1],
-    lower_95       = nowcast_row$lower_95[1],
-    upper_95       = nowcast_row$upper_95[1],
-    share_observed = nowcast_row$share_observed[1]
-  )
+  rows <- nowcast_rows |>
+    dplyr::transmute(
+      run_timestamp  = .data$run_timestamp,
+      commodity      = .data$commodity,
+      quarter_end    = .data$quarter_end,
+      point_estimate = .data$point_estimate_Mt,
+      lower_80       = .data$lower_80,
+      upper_80       = .data$upper_80,
+      lower_95       = .data$lower_95,
+      upper_95       = .data$upper_95,
+      share_observed = .data$share_observed
+    )
 
-  wh_append("mart_nowcast_history", row, cfg,
-            keys = c("run_timestamp", "quarter_end"))
-  invisible(row)
+  wh_append("mart_nowcast_history", rows, cfg,
+            keys = c("run_timestamp", "commodity", "quarter_end"))
+  invisible(rows)
 }
 
-#' Fetch the previous run's nowcast for the same quarter, if any
+#' Fetch the previous run's nowcast for a specific commodity + quarter
 #'
 #' @param cfg Config list.
+#' @param commodity Commodity name (e.g. "iron_ore").
 #' @param current_quarter Quarter-end date.
 #' @param exclude_run_timestamp POSIXct to exclude (typically this run).
 #' @return One-row tibble or NULL if no prior run exists.
 #' @export
-last_nowcast_run <- function(cfg, current_quarter,
+last_nowcast_run <- function(cfg, commodity, current_quarter,
                              exclude_run_timestamp = NULL) {
   hist <- wh_read("mart_nowcast_history", cfg)
-  if (is.null(hist) || nrow(hist) == 0) return(NULL)
+  if (is.null(hist) || nrow(hist) == 0L) return(NULL)
 
   rows <- hist |>
-    dplyr::filter(.data$quarter_end == as.Date(current_quarter)) |>
+    dplyr::filter(.data$commodity   == commodity,
+                  .data$quarter_end == as.Date(current_quarter)) |>
     dplyr::arrange(dplyr::desc(.data$run_timestamp))
 
   if (!is.null(exclude_run_timestamp)) {
     rows <- rows[rows$run_timestamp != exclude_run_timestamp, , drop = FALSE]
   }
-  if (nrow(rows) == 0) return(NULL)
+  if (nrow(rows) == 0L) return(NULL)
   tibble::as_tibble(rows[1, , drop = FALSE])
 }
 
-#' Compute delta between current and previous nowcast
+#' Compute delta between current and previous nowcast for one commodity
 #'
-#' @param current One-row tibble from [run_nowcast()].
+#' @param current One-row tibble filtered from [run_nowcast()].
 #' @param previous One-row tibble from [last_nowcast_run()].
 #' @return Tibble of deltas, or `NULL` if `previous` is `NULL`.
 #' @export
 nowcast_delta <- function(current, previous) {
-  if (is.null(previous) || nrow(previous) == 0) return(NULL)
+  if (is.null(previous) || nrow(previous) == 0L) return(NULL)
   tibble::tibble(
-    delta_point     = current$point_estimate - previous$point_estimate,
+    commodity       = current$commodity,
+    delta_point     = current$point_estimate_Mt - previous$point_estimate,
     delta_lower_80  = current$lower_80       - previous$lower_80,
     delta_upper_80  = current$upper_80       - previous$upper_80,
     delta_lower_95  = current$lower_95       - previous$lower_95,
     delta_upper_95  = current$upper_95       - previous$upper_95,
     share_now       = current$share_observed,
-    share_prior     = previous$share_observed,
-    hours_since     = as.numeric(difftime(current$run_timestamp,
+    share_prior    = previous$share_observed,
+    hours_since    = as.numeric(difftime(current$run_timestamp,
                                           previous$run_timestamp,
                                           units = "hours"))
   )

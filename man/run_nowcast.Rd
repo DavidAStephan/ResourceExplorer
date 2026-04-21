@@ -2,54 +2,52 @@
 % Please edit documentation in R/nowcast.R
 \name{run_nowcast}
 \alias{run_nowcast}
-\title{Produce the running current-quarter nowcast}
+\title{Per-commodity running quarterly volume nowcast}
 \usage{
 run_nowcast(
   bridge_fits,
   features,
-  deflators,
   cfg,
   portwatch = NULL,
   ports_meta = NULL,
-  fred = NULL,
   as_of = Sys.Date()
 )
 }
 \arguments{
 \item{bridge_fits}{Output of \code{\link[=fit_bridge]{fit_bridge()}}.}
 
-\item{features}{Long feature tibble from \code{\link[=build_features]{build_features()}}.}
+\item{features}{Quarterly feature tibble from \code{\link[=build_features]{build_features()}}.}
 
-\item{deflators}{Output of \code{\link[=implicit_deflator]{implicit_deflator()}}.}
+\item{cfg}{Config list; uses \code{cfg$nowcast$bootstrap_reps} and
+\code{cfg$nowcast$seed}.}
 
-\item{cfg}{Config list; \code{cfg$nowcast$bootstrap_reps} and
-\code{cfg$nowcast$seed} control the draw count and reproducibility.}
+\item{portwatch}{Daily PortWatch tonnage tibble.}
 
-\item{portwatch}{Daily tonnage tibble (for within-quarter extrapolation).}
-
-\item{ports_meta}{Port metadata.}
-
-\item{fred}{FRED prices (for forward-looking price rows).}
+\item{ports_meta}{Port metadata (passed through, currently unused by
+the quarterly pipeline -- the portwatch tibble is already
+commodity-labelled).}
 
 \item{as_of}{Reference date; defaults to \code{Sys.Date()}.}
 }
 \value{
-One-row tibble: \code{quarter_end}, \code{point_estimate}, \code{lower_80},
-\code{upper_80}, \code{lower_95}, \code{upper_95}, \code{share_observed},
-\code{run_timestamp}.
+Tibble with one row per commodity: \code{commodity}, \code{quarter_end},
+\code{point_estimate_chainvol_aud_m}, \code{lower_80}, \code{upper_80}, \code{lower_95},
+\code{upper_95}, \code{share_observed}, \code{run_timestamp}.
 }
 \description{
-Combines: (1) observed PortWatch tonnage through \code{as_of},
-(2) \code{\link[=extrapolate_quarter_tonnage]{extrapolate_quarter_tonnage()}} for partial/future months,
-(3) recursive bridge prediction per commodity, (4) quarterly
-aggregation, (5) chain-volume conversion via
-\code{\link[=apply_chain_volume]{apply_chain_volume()}}, (6) residual bootstrap for 80/95 bands with
-variance shrinkage proportional to \code{sqrt(1 - share_observed)}.
+For each named commodity: compute the current-quarter point estimate
+(chain-volume A$m) and 80/95 bootstrap uncertainty bands. Returns one
+row per commodity — no aggregation across commodities is performed.
 }
 \details{
-The bootstrap is \strong{recursive}: each draw resamples three monthly
-residuals per commodity and propagates the perturbed log-y forward
-through the AR(1) lag. Per-commodity draws are independent (the
-"independent residual" spec; joint-across-commodities is a Phase 5
-polish item).
+Steps:
+\enumerate{
+\item Extrapolate partial-quarter PortWatch tonnage to a full-quarter
+estimate (see \code{\link[=extrapolate_quarter_tonnage]{extrapolate_quarter_tonnage()}}).
+\item Seasonally-adjust the quarterly tonnage using the STL fit's most
+recent seasonal factor (proxy — we don't refit STL each run).
+\item Predict \verb{log volume} from the bridge regression.
+\item Residual bootstrap for 80/95 bands, variance scaled by
+\code{sqrt(1 - share_observed)}.
+}
 }

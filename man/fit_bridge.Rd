@@ -2,16 +2,15 @@
 % Please edit documentation in R/bridge.R
 \name{fit_bridge}
 \alias{fit_bridge}
-\title{Fit per-commodity bridge regressions}
+\title{Fit per-commodity quarterly volume bridge regressions}
 \usage{
 fit_bridge(features, cfg)
 }
 \arguments{
-\item{features}{Long tibble from \code{\link[=build_features]{build_features()}}.}
+\item{features}{Quarterly feature tibble from \code{\link[=build_features]{build_features()}}.}
 
-\item{cfg}{Config list. Uses \code{cfg$sample$train_end} to restrict the
-estimation window (everything later is held out for Phase 4
-backtesting / nowcasting).}
+\item{cfg}{Config list. Uses \code{cfg$sample$train_end}, \code{cfg$commodities},
+\code{cfg$bridge$hac_lag}, \code{cfg$bridge$min_n}.}
 }
 \value{
 Named list keyed by commodity. Each element is a list with:
@@ -24,35 +23,28 @@ dw_stat, beta_tonnage, beta_tonnage_se)
 }
 }
 \description{
-\strong{Specification.} For each commodity \code{c} we fit, on monthly data,
+\strong{Specification.} For each commodity \code{c} we fit, on quarterly data,
 }
 \details{
-\deqn{\log y_{c,m} = \beta_0 + \beta_1 \log T^{SA}_{c,m} + \beta_2 \log P_{c,m} + \beta_3 \log y_{c,m-1} + \varepsilon_{c,m}}
+\deqn{\log V_{c,Q} = \beta_0 + \beta_1 \log T^{SA}_{c,Q} + \beta_2 \log V_{c,Q-1} + \varepsilon_{c,Q}}
 
-\strong{Why log-levels rather than first-differences.} Australian
-commodity export values have persistent level shifts (the 2020-2022
-iron-ore spike, the 2022 LNG shock) that carry economically
-meaningful information. First-differencing throws those away. The
-trade-off is serial correlation in the residuals, which we handle
-two ways: (a) the AR(1) lag on \code{log_y} absorbs most of it at the
-conditional-mean level, and (b) Newey-West (HAC) standard errors
-with \code{lag = 3} keep inference honest on the remainder.
+where \code{V} is the ABS 5302 Table 25 chain-volume series for commodity
+\code{c} (LHS target) and \code{T^{SA}} is STL-seasonally-adjusted quarterly
+PortWatch tonnage. The AR(1) lag absorbs most residual persistence;
+Newey-West HAC standard errors with \code{lag = cfg$bridge$hac_lag} (1 at
+quarterly frequency, by default) handle what remains.
 
-\strong{Why AR(1) and not richer dynamics.} With a ~60-month training
-window per commodity, we have a single-digit parameter budget per
-bridge. One lag captures the bulk of the persistence and doubles as
-the "bridge" mechanism at nowcast time -- it lets partial-month
-observations of \verb{log T} update \verb{log y} through its own lagged value.
-Phase 4 can add further lags if residual diagnostics warrant.
+\strong{Why no log price.} The target is already a \emph{volume} measure
+(chain-volume, reference year 2022-23). Price effects are stripped
+on the LHS by construction; adding \verb{log P} on the RHS would fit a
+coefficient the target has nothing to tie it to. Volume ~ tonnage is
+the relationship the bridge identifies.
 
-\strong{Why log on both sides.} Exports value = price x quantity, so
-taking logs makes the RHS additive in \verb{log P} and \verb{log T}. \code{beta_1}
-then reads as an elasticity of value with respect to tonnage --
-expected to be close to 1 for a commodity whose tonnage and value
-move together. Large deviations from 1 flag either mix-shifts in the
-commodity basket (coal 321 vs 322), measurement differences
-(PortWatch coverage gaps), or genuine unit-value swings.
-
-\strong{Zero and missing values} are filtered out upstream in
-\code{\link[=build_features]{build_features()}} -- we don't have to handle them here.
+\strong{Guardrails.}
+\itemize{
+\item Commodities with fewer than \code{cfg$bridge$min_n} training quarters
+are skipped.
+\item Any regressor (or LHS) with near-zero variance skips with a warning.
+\item \code{nw_vcov()} failures (rare — usually singular design) skip.
+}
 }

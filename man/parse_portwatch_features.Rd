@@ -2,7 +2,7 @@
 % Please edit documentation in R/ingest_portwatch.R
 \name{parse_portwatch_features}
 \alias{parse_portwatch_features}
-\title{Parse an ArcGIS FeatureServer JSON body into our canonical schema.}
+\title{Parse an ArcGIS FeatureServer JSON body into a wide per-port-day tibble.}
 \usage{
 parse_portwatch_features(json_body)
 }
@@ -10,11 +10,13 @@ parse_portwatch_features(json_body)
 \item{json_body}{Raw JSON string from the FeatureServer \code{query} endpoint.}
 }
 \value{
-Tibble matching \code{raw.portwatch_tonnage_daily}.
+Wide tibble: \code{obs_date}, \code{portid}, \code{portname},
+\code{export_dry_bulk}, \code{export_tanker}, \code{export_container},
+\code{export_general_cargo}, \code{export_roro}, \code{portcalls}, \code{ingested_at}.
 }
 \description{
-Isolated from \code{\link[=pull_portwatch_pages]{pull_portwatch_pages()}} so tests can hit it with a
-fixture string. Handles the IMF field-name variation by best-effort
-matching on common spellings.
+Returns the minimum set of columns we use downstream; unused IMF
+columns (country, year, import_*) are dropped on ingestion to keep
+the warehouse tight.
 }
 \keyword{internal}

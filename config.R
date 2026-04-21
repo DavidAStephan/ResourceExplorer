@@ -1,18 +1,20 @@
 ## ResourceTracker configuration
 ##
-## Returns a named list. Sourced by `load_config()` (R/config.R); prefer
-## editing values here over patching at runtime. This file replaced the
-## previous `config.yml` because the work-laptop package allow-list does
-## not include the `config` or `yaml` packages.
+## Per-commodity quarterly physical-tonnage nowcasts for iron_ore and coal.
+## Target:   DISR Resources and Energy Quarterly Table 16 (physical Mt).
+## Indicator: IMF PortWatch AIS daily tonnage, aggregated to quarterly.
+##
+## LNG was scoped out 2026-04-21 — PortWatch tanker tonnage has near-zero
+## correlation with ABS LNG volume at quarterly grain. Australian LNG is
+## too contract-dominated to be nowcastable from physical indicators.
 
 list(
   paths = list(
-    warehouse_dir   = "data/warehouse",
-    cache           = "data/cache",
-    outputs         = "outputs",
-    logs            = "logs",
-    ports_metadata  = "inst/extdata/ports_metadata.csv",
-    sitc_crosswalk  = "inst/extdata/sitc_crosswalk.csv"
+    warehouse_dir  = "data/warehouse",
+    cache          = "data/cache",
+    outputs        = "outputs",
+    logs           = "logs",
+    ports_metadata = "inst/extdata/ports_metadata.csv"
   ),
 
   sample = list(
@@ -21,57 +23,55 @@ list(
     valid_start = as.Date("2024-01-01")
   ),
 
-  commodities = c("iron_ore", "coal", "lng", "other"),
+  commodities = c("iron_ore", "coal"),
 
-  cache = list(
-    # Cache is a fallback, not a freshness policy. Every run refreshes from
-    # source; on fetch failure we fall back to the most recent cached RDS
-    # and tag the returned tibble with attr(x, "cache_status").
-    enabled = TRUE
-  ),
+  cache = list(enabled = TRUE),
 
   portwatch = list(
-    # IMF PortWatch daily trade panel -- public ArcGIS FeatureServer.
-    # Placeholder URL; validated on first live run. Override at runtime
-    # via Sys.setenv(PORTWATCH_BASE_URL=...) if the layer ID moves.
-    base_url  = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/PortWatch_daily_trade_panel/FeatureServer/0",
+    base_url  = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/ArcGIS/rest/services/Daily_Ports_Data/FeatureServer/0",
     countries = c("AUS"),
-    page_size = 2000L,
-    retry     = list(
-      max_attempts    = 3L,
-      backoff_seconds = 5L
-    )
+    page_size = 1000L,
+    retry     = list(max_attempts = 3L, backoff_seconds = 5L),
+    # LNG port whitelist -- kept in config for completeness even though
+    # lng is out of the nowcasting scope. Tanker tonnage routing.
+    lng_ports = c("Darwin", "Dampier", "Gladstone", "Gorgon LNG", "Onslow")
   ),
 
-  abs = list(
-    cat_5368    = "5368.0",
-    tables_5368 = c("12a", "12b"),
-    cat_5302    = "5302.0",
-    tables_5302 = c("1", "2"),
-    # SITC 3-digit codes mapped to bridge-regression commodities.
-    # LNG: SITC 343 includes non-LNG natural gas; LNG dominates AUS
-    # exports of 343 so this is an MVP proxy. Upgrade to HS 2711.11 later
-    # if residuals warrant it.
-    commodity_sitc = list(
-      iron_ore = c("281"),
-      coal     = c("321", "322"),
-      lng      = c("343")
+  disr = list(
+    # Sheet name and row mapping in DISR REQ Historical Data workbook.
+    # Iron ore row 19 is in kt; coal rows 47+48 (metallurgical + thermal)
+    # are in Mt. The url_override key forces a specific release (useful
+    # for testing / reproducibility); when NULL the code probes for the
+    # latest publication.
+    sheet        = "16",
+    url_override = NULL,
+    rows = list(
+      iron_ore = list(rows = 19L,          unit = "kt"),
+      coal     = list(rows = c(47L, 48L),  unit = "Mt")
     )
-  ),
-
-  fred = list(
-    series_ids = c(
-      "PIORECRUSDM",   # Iron ore, China import CFR
-      "PCOALAUUSDM",   # Coal, Australia thermal
-      "PNGASJPUSDM"    # Natural gas, Japan LNG
-    )
-    # Required env var: FRED_API_KEY (from .Renviron). Fetch gracefully
-    # degrades to cache when unset.
   ),
 
   nowcast = list(
     bootstrap_reps = 1000L,
     seed           = 20260419L
+  ),
+
+  bridge = list(
+    hac_lag = 1L,
+    min_n   = 12L,
+    # Per-commodity model spec. "aggregate" uses a single YoY-Δ tonnage
+    # predictor (parsimonious, better when monthly betas would be
+    # roughly equal); "midas" uses three per-month YoY-Δ predictors
+    # (flexible, better when within-quarter timing carries signal).
+    #
+    # Choices come from the 2026-04-21 backtest-RMSE comparison:
+    # iron_ore improves ~5% under MIDAS (β_m1 dominates) while coal is
+    # ~16% worse because its monthly betas are roughly equal, so the
+    # extra parameters inflate variance without new signal.
+    spec = list(
+      iron_ore = "midas",
+      coal     = "aggregate"
+    )
   ),
 
   logging = list(

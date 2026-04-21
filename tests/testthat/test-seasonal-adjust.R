@@ -1,37 +1,39 @@
-test_that("x13_adjust returns value_sa for a 5-year monthly series", {
-  n <- 60
-  month_end <- seq(as.Date("2018-01-01"), by = "month", length.out = n)
-  month_end <- lubridate::ceiling_date(month_end, "month") - 1
+test_that("stl_quarterly_adjust deseasonalises a 32-quarter series", {
+  n <- 32
+  q_floor <- seq(as.Date("2019-01-01"), by = "3 months", length.out = n)
+  q_end <- lubridate::ceiling_date(q_floor, "quarter") - 1
   t <- seq_len(n)
-  seasonal_pattern <- 0.15 * sin(2 * pi * t / 12)
-  trend <- 0.01 * t
-  value <- exp(4 + trend + seasonal_pattern + stats::rnorm(n, 0, 0.05))
+  seasonal <- 0.20 * sin(2 * pi * t / 4)
+  trend    <- 0.01 * t
+  set.seed(7)
+  value    <- exp(4 + trend + seasonal + stats::rnorm(n, 0, 0.03))
+  df <- tibble::tibble(quarter_end = q_end, value = value)
 
-  df <- tibble::tibble(month_end = month_end, value = value)
-  out <- x13_adjust(df)
-
+  out <- stl_quarterly_adjust(df)
   expect_true("value_sa" %in% names(out))
   expect_equal(nrow(out), n)
-  # SA series should have smaller seasonal variance than raw
-  raw_var <- stats::var(diff(out$value, lag = 12))
-  sa_var  <- stats::var(diff(out$value_sa, lag = 12))
-  expect_lt(sa_var, raw_var)
+
+  # Seasonal pattern strength: variance of the mean BY quarter-of-year.
+  # A well-adjusted series should have near-constant per-quarter means.
+  raw_by_q <- tapply(out$value,    lubridate::quarter(out$quarter_end), mean)
+  sa_by_q  <- tapply(out$value_sa, lubridate::quarter(out$quarter_end), mean)
+  expect_lt(stats::var(sa_by_q), stats::var(raw_by_q))
 })
 
-test_that("x13_adjust returns original series when n < 36", {
+test_that("stl_quarterly_adjust returns original when n < 8", {
   df <- tibble::tibble(
-    month_end = seq(as.Date("2022-01-01"), by = "month", length.out = 24) |>
-      (\(d) lubridate::ceiling_date(d, "month") - 1)(),
-    value     = stats::rnorm(24, 100, 10)
+    quarter_end = seq(as.Date("2024-03-31"), by = "3 months", length.out = 6) |>
+      (\(d) lubridate::ceiling_date(d, "quarter") - 1)(),
+    value = stats::rnorm(6, 100, 10)
   )
-  out <- x13_adjust(df)
+  out <- stl_quarterly_adjust(df)
   expect_equal(out$value_sa, out$value)
 })
 
-test_that("x13_adjust handles empty input", {
-  out <- x13_adjust(tibble::tibble(
-    month_end = as.Date(character()),
-    value = double()
+test_that("stl_quarterly_adjust handles empty input", {
+  out <- stl_quarterly_adjust(tibble::tibble(
+    quarter_end = as.Date(character()),
+    value       = double()
   ))
   expect_equal(nrow(out), 0)
   expect_true("value_sa" %in% names(out))

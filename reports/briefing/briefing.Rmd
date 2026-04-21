@@ -1,6 +1,6 @@
 ---
-title: "Australian Real Goods Nowcast — Briefing"
-subtitle: "resourcetracker · weekly run"
+title: "Australian Resource Export Volumes — Quarterly Nowcast"
+subtitle: "resourcetracker · per-commodity tonnage nowcast (iron_ore, coal)"
 date: "`r Sys.Date()`"
 output:
   html_document:
@@ -26,7 +26,6 @@ safe_read_csv <- function(p) {
   if (!file_exists(p)) return(tibble())
   suppressMessages(read_csv(p, show_col_types = FALSE))
 }
-
 safe_read_wh <- function(name) {
   p <- path(wh_dir, paste0(name, ".rds"))
   if (!file_exists(p)) return(tibble())
@@ -34,63 +33,116 @@ safe_read_wh <- function(name) {
 }
 
 nowcast  <- safe_read_csv(path(outputs, "nowcast_current.csv"))
-tonnage  <- safe_read_csv(path(outputs, "tonnage_monthly.csv"))
+tonnage  <- safe_read_csv(path(outputs, "tonnage_quarterly.csv"))
 diag_fit <- safe_read_csv(path(outputs, "bridge_diagnostics.csv"))
-
 history  <- safe_read_wh("mart_nowcast_history")
-abs_5302 <- safe_read_wh("raw_abs_5302_quarterly")
-anoms    <- safe_read_wh("mart_latest_anomalies")
+disr     <- safe_read_wh("raw_disr_req_quarterly")
+
+com_levels <- c("iron_ore", "coal")
 ```
 
-## Headline nowcast
+## Headline: current-quarter nowcasts (Mt)
 
 ```{r headline, results='asis'}
-if (nrow(nowcast) == 0 || is.na(nowcast$point_estimate[1])) {
+if (nrow(nowcast) == 0) {
   cat("*No nowcast available this run.*")
 } else {
-  nc <- nowcast[1, ]
-  cat(sprintf(
-    "**Quarter %s:** A$%s million (80%% CI: A$%s – A$%s; 95%% CI: A$%s – A$%s). Share of quarter observed: %.0f%%.",
-    format(nc$quarter_end, "%b %Y"),
-    formatC(nc$point_estimate, format = "d", big.mark = ","),
-    formatC(nc$lower_80,       format = "d", big.mark = ","),
-    formatC(nc$upper_80,       format = "d", big.mark = ","),
-    formatC(nc$lower_95,       format = "d", big.mark = ","),
-    formatC(nc$upper_95,       format = "d", big.mark = ","),
-    100 * nc$share_observed
-  ))
+  nc <- nowcast |>
+    mutate(commodity = factor(commodity, levels = com_levels)) |>
+    arrange(commodity)
+  for (i in seq_len(nrow(nc))) {
+    r <- nc[i, ]
+    cat(sprintf(
+      "- **%s** (%s): **%.1f Mt**  (80%% CI: %.1f – %.1f Mt).  Share observed: %.0f%%.\n",
+      toupper(as.character(r$commodity)),
+      format(r$quarter_end, "%b %Y"),
+      r$point_estimate_Mt,
+      r$lower_80, r$upper_80,
+      100 * r$share_observed
+    ))
+  }
 }
 ```
 
-```{r headline-plot, fig.width=7, fig.height=3.5}
-if (nrow(history) > 0) {
-  history |>
-    mutate(quarter_end = as.Date(quarter_end)) |>
-    ggplot(aes(run_timestamp, point_estimate)) +
-    geom_ribbon(aes(ymin = lower_95, ymax = upper_95), alpha = 0.15) +
-    geom_ribbon(aes(ymin = lower_80, ymax = upper_80), alpha = 0.25) +
-    geom_line() +
-    labs(x = "Run timestamp",
-         y = "Real goods credits (A$m, chain-volume)",
-         title = "Nowcast evolution within the current quarter") +
+## Nowcast vs recent actuals
+
+```{r actuals-plot, fig.width=9, fig.height=4.5}
+if (nrow(disr) > 0 && nrow(nowcast) > 0) {
+  hist <- disr |>
+    mutate(quarter_end = as.Date(quarter_end),
+           commodity   = factor(commodity, levels = com_levels)) |>
+    filter(!is.na(commodity),
+           quarter_end >= as.Date("2019-01-01")) |>
+    arrange(commodity, quarter_end)
+
+  nc <- nowcast |>
+    mutate(quarter_end = as.Date(quarter_end),
+           commodity   = factor(commodity, levels = com_levels))
+
+  ggplot(hist, aes(quarter_end, tonnes_Mt)) +
+    geom_line(colour = "grey40") +
+    geom_point(colour = "grey40", size = 1) +
+    geom_point(data = nc,
+               aes(quarter_end, point_estimate_Mt),
+               colour = "steelblue", size = 3) +
+    geom_linerange(data = nc,
+                   aes(x = quarter_end,
+                       ymin = lower_95, ymax = upper_95,
+                       y = point_estimate_Mt),
+                   colour = "steelblue", alpha = 0.35, linewidth = 1.2) +
+    geom_linerange(data = nc,
+                   aes(x = quarter_end,
+                       ymin = lower_80, ymax = upper_80,
+                       y = point_estimate_Mt),
+                   colour = "steelblue", alpha = 0.65, linewidth = 1.8) +
+    facet_wrap(~ commodity, scales = "free_y") +
+    labs(x = NULL, y = "Quarterly exports (Mt)",
+         title = "Quarterly export volume: history (grey) + current nowcast (blue)") +
     theme_minimal()
 }
 ```
 
-## Commodity decomposition
+## Bridge diagnostics
 
-```{r decomposition}
+```{r diagnostics}
+if (nrow(diag_fit) > 0) {
+  diag_fit |>
+    mutate(
+      commodity     = factor(commodity, levels = com_levels),
+      beta_tonnage  = sprintf("%.3f (se %.3f)", beta_tonnage, beta_tonnage_se),
+      r_squared     = round(r_squared, 3),
+      rmse_train    = round(rmse_train, 3),
+      dw_stat       = round(dw_stat, 2),
+      rmse_valid    = round(rmse_valid, 2),
+      rmse_naive    = round(rmse_naive, 2),
+      ratio_vs_naive = round(ratio_vs_naive, 2)
+    ) |>
+    arrange(commodity) |>
+    select(commodity, n_obs, r_squared, rmse_train, dw_stat,
+           beta_tonnage, rmse_valid, rmse_naive, ratio_vs_naive) |>
+    knitr::kable(
+      caption = "Bridge training fit (`n_obs` = training quarters) and walk-forward validation vs seasonal-random-walk. `ratio_vs_naive` < 1 means the model beats naive."
+    )
+}
+```
+
+## PortWatch tonnage trend
+
+```{r tonnage-plot, fig.width=9, fig.height=3.5}
 if (nrow(tonnage) > 0) {
   tonnage |>
-    filter(!is.na(commodity)) |>
-    group_by(commodity) |>
-    summarise(tonnage = sum(tonnage, na.rm = TRUE), .groups = "drop") |>
-    mutate(share = tonnage / sum(tonnage)) |>
-    arrange(desc(share)) |>
-    knitr::kable(digits = c(NA, 0, 3),
-                 col.names = c("Commodity", "Tonnage (summed)", "Share"))
-} else {
-  cat("*Tonnage panel empty.*")
+    mutate(quarter_end = as.Date(quarter_end),
+           commodity   = factor(commodity, levels = com_levels)) |>
+    filter(!is.na(commodity),
+           quarter_end >= as.Date("2019-01-01")) |>
+    ggplot(aes(quarter_end, tonnage / 1e6, colour = commodity)) +
+    geom_line() +
+    geom_point(size = 1) +
+    facet_wrap(~ commodity, scales = "free_y") +
+    labs(x = NULL, y = "Quarterly PortWatch tonnage (Mt)",
+         title = "PortWatch quarterly tonnage by commodity") +
+    theme_minimal() +
+    theme(legend.position = "none")
 }
 ```
 
@@ -98,71 +150,44 @@ if (nrow(tonnage) > 0) {
 
 ```{r delta}
 if (nrow(history) >= 2) {
-  ordered <- history[order(history$run_timestamp), ]
-  current <- ordered[nrow(ordered), ]
-  prev    <- ordered[nrow(ordered) - 1, ]
-  tibble(
-    metric = c("Point estimate", "80% lower", "80% upper",
-               "95% lower", "95% upper", "Share observed"),
-    prior  = c(prev$point_estimate, prev$lower_80, prev$upper_80,
-               prev$lower_95, prev$upper_95, prev$share_observed),
-    now    = c(current$point_estimate, current$lower_80, current$upper_80,
-               current$lower_95, current$upper_95, current$share_observed),
-    delta  = c(current$point_estimate - prev$point_estimate,
-               current$lower_80       - prev$lower_80,
-               current$upper_80       - prev$upper_80,
-               current$lower_95       - prev$lower_95,
-               current$upper_95       - prev$upper_95,
-               current$share_observed - prev$share_observed)
-  ) |>
-    knitr::kable(digits = c(NA, 1, 1, 1))
+  by_com <- history |>
+    mutate(run_timestamp = as.POSIXct(run_timestamp)) |>
+    arrange(commodity, run_timestamp) |>
+    group_by(commodity) |>
+    summarise(
+      prior_point = dplyr::nth(point_estimate, -2L),
+      now_point   = dplyr::last(point_estimate),
+      delta       = now_point - prior_point,
+      hours_since = as.numeric(difftime(
+                      dplyr::last(run_timestamp),
+                      dplyr::nth(run_timestamp, -2L),
+                      units = "hours")),
+      .groups = "drop"
+    ) |>
+    filter(!is.na(prior_point))
+  if (nrow(by_com) > 0) {
+    by_com |>
+      mutate(prior_point = round(prior_point, 2),
+             now_point   = round(now_point, 2),
+             delta       = round(delta, 2),
+             hours_since = round(hours_since, 1)) |>
+      knitr::kable()
+  } else {
+    cat("*First run for every commodity -- no prior to compare against.*")
+  }
 } else {
-  cat("*First run this quarter -- no prior run to compare against.*")
-}
-```
-
-## Comparison to ABS latest actual
-
-```{r abs-compare, results='asis'}
-if (nrow(abs_5302) > 0) {
-  latest_abs <- abs_5302 |>
-    filter(!is.na(value_chainvol_aud_m), value_chainvol_aud_m > 0) |>
-    arrange(desc(quarter_end)) |>
-    slice(1)
-  cat(sprintf(
-    "Latest ABS 5302.0 actual (quarter ending %s): **A$%s million**.\n\n",
-    format(as.Date(latest_abs$quarter_end), "%b %Y"),
-    formatC(latest_abs$value_chainvol_aud_m,
-            format = "d", big.mark = ",")
-  ))
-} else {
-  cat("*ABS 5302.0 panel empty.*")
-}
-```
-
-## Flagged anomalies
-
-```{r anomalies-table}
-if (nrow(anoms) > 0) {
-  anoms |>
-    arrange(desc(abs(z_score))) |>
-    slice_head(n = 10) |>
-    select(obs_date, port_id, commodity, tonnage, z_score) |>
-    knitr::kable(digits = c(NA, NA, NA, 0, 2))
-} else {
-  cat("*No >2σ departures flagged in the last 28 days.*")
+  cat("*First run -- no prior nowcast in history.*")
 }
 ```
 
 ## Methodology footnote
 
-Bridge regression per commodity on log levels with an AR(1) lag:
+For each commodity $c \in \{\text{iron\_ore}, \text{coal}\}$, quarterly frequency:
 
-$$\log y_{c,m} = \beta_0 + \beta_1 \log T^{SA}_{c,m} + \beta_2 \log P_{c,m} + \beta_3 \log y_{c,m-1} + \varepsilon_{c,m}$$
+$$\log V_{c,Q} = \beta_0 + \beta_1 \log T^{SA}_{c,Q} + \beta_2 \log V_{c,Q-1} + \varepsilon_{c,Q}$$
 
-Fit on 2019-01 → 2023-12; validated on 2024+. Newey-West (Bartlett) SEs
-with lag 3. Seasonal adjustment via `stats::stl()` (periodic, robust).
-Quarterly aggregate converted to chain-volume via the ABS 5302.0
-implicit deflator (trailing 4-quarter mean as forecast). Uncertainty
-bands via 1,000 bootstrap draws of bridge residuals, scaled by
-$\sqrt{1 - \text{share\_observed}}$.
+- $V_{c,Q}$ = DISR Resources & Energy Quarterly Table 16, physical tonnage (Mt) by commodity. Coal is metallurgical + thermal summed.
+- $T^{SA}_{c,Q}$ = STL seasonally-adjusted quarterly PortWatch tonnage, summed across ports whose `commodity_class` matches $c$. Tanker tonnage at LNG-whitelisted ports routes to `lng` at ingestion but is then scoped out of the bridge panel (LNG was dropped 2026-04-21 after zero-correlation finding).
+- Fit window: 2019-Q1 → 2023-Q4 (RHS-constrained by PortWatch coverage). Validation: 2024-Q1 onward.
+- Newey-West HAC standard errors with `lag = 1` at quarterly frequency.
+- Uncertainty bands: residual bootstrap, scaled by $\sqrt{1 - \text{share\_observed}}$ so bands collapse as the current quarter fills in.

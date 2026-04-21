@@ -2,11 +2,24 @@
 % Please edit documentation in R/ingest_portwatch.R
 \name{pull_portwatch_pages}
 \alias{pull_portwatch_pages}
-\title{Page through the FeatureServer and return the union as a tibble}
+\title{Page through the FeatureServer and return the union as a wide tibble}
 \usage{
 pull_portwatch_pages(cfg)
 }
 \description{
-Page through the FeatureServer and return the union as a tibble
+Returned columns mirror the ArcGIS schema: \code{obs_date}, \code{portid},
+\code{portname}, \code{export_dry_bulk}, \code{export_tanker}, \code{export_container},
+\code{export_general_cargo}, \code{export_roro}, \code{portcalls}. A final
+\code{ingested_at} column tracks fetch timestamp.
+}
+\details{
+\strong{Why per-port}: The IMF ArcGIS server silently stops returning rows
+when \code{resultOffset} exceeds ~5000 even though the layer claims
+\code{supportsPagination = TRUE} and \code{maxRecordCount = 1000}. Querying the
+full country panel in one cursor caps us at 5000/151449 rows
+(observed 2026-04-21). We work around by listing every port once,
+then querying each port independently (~2657 daily rows per port ==
+3 pages of 1000). Each port's pagination stays well below the server's
+offset ceiling.
 }
 \keyword{internal}
