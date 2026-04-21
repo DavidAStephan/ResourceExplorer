@@ -1,53 +1,40 @@
-#' Walk-forward backtest of the bridge ensemble vs ABS 5302.0 actuals
+#' Per-commodity walk-forward backtest vs ABS 5302 T25 chain-volume actuals
 #'
-#' **Scheme.** Expanding-window refit. For each quarter `Q` from
-#' `cfg$sample$valid_start` to the last quarter for which 5302.0 has
-#' landed, we:
+#' Expanding-window refit. For each validation quarter `Q` from
+#' `cfg$sample$valid_start` to the last quarter with an ABS T25 actual,
+#' for each commodity `c`:
 #'
-#' 1. Cut the feature panel to `month_end <= (start_of_Q - 1 month)` --
-#'    i.e. the last observation is the month immediately preceding Q.
-#' 2. Refit all commodity bridges via [fit_bridge()] on that window.
-#' 3. Build the Q prediction feature frame (the three months of Q from
-#'    `features`). Feed it to [predict_bridge()], which recursively
-#'    uses its own predictions as lags from month 2 onward.
-#' 4. Sum monthly predictions across commodities to a quarterly
-#'    current-price total; chain-volume convert via
-#'    [apply_chain_volume()].
-#' 5. Record actual (from 5302.0), point estimate, and the
-#'    seasonal-random-walk benchmark `actual_{Q-4}`.
+#'  1. Cut features to `quarter_end <= (Q - one quarter)`.
+#'  2. Refit `fit_bridge` on that window.
+#'  3. Predict quarter `Q` via `predict_bridge` using the `Q`'s feature
+#'     row (observed quarterly tonnage).
+#'  4. Record actual (ABS T25), point estimate, and naive seasonal
+#'     random walk (`V_{Q-4}`) for the same commodity.
 #'
-#' **Benchmark.** Seasonal random walk at quarterly frequency:
-#' `y_hat_Q = actual_{Q-4}`. This is the "no-skill" anchor the brief
-#' mandates. The success target is RMSE >= 30% below the benchmark.
+#' Per-commodity errors are reported; no aggregation across commodities.
+#' Ratio vs naive per commodity — the brief's 30%-better target becomes
+#' a commodity-level check.
 #'
-#' **Window choice.** Expanding (not rolling). The brief names a
-#' 2019-2023 train sample and the economic regime is better captured
-#' by more data than by a fixed-width window -- particularly important
-#' for LNG given the 2022 shock. Switch to rolling in Phase 4 if
-#' structural breaks become a concern.
-#'
-#' @param features Long feature tibble from [build_features()].
-#' @param abs_5302 Quarterly ABS tibble from [fetch_abs_5302()].
+#' @param features Quarterly feature tibble from [build_features()].
 #' @param cfg Config list.
-#' @return Tibble: `quarter_end`, `actual`, `point_estimate`,
-#'   `naive_srw`, `err`, `err_naive`.
+#' @return Tibble: `commodity`, `quarter_end`, `actual`,
+#'   `point_estimate`, `naive_srw`, `err`, `err_naive`.
 #' @export
-backtest_rmse <- function(features, abs_5302, cfg) {
-  deflators <- implicit_deflator(abs_5302)
-
-  actuals <- abs_5302 |>
-    dplyr::filter(!is.na(.data$value_chainvol_aud_m),
-                  .data$value_chainvol_aud_m > 0) |>
-    dplyr::group_by(.data$quarter_end) |>
-    dplyr::summarise(actual = sum(.data$value_chainvol_aud_m, na.rm = TRUE),
-                     .groups = "drop")
-
+backtest_rmse <- function(features, cfg) {
+  commodities <- cfg$commodities %||% unique(features$commodity)
   valid_start <- as.Date(cfg$sample$valid_start %||% "2024-01-01")
-  valid_quarters <- actuals$quarter_end[actuals$quarter_end >= valid_start]
 
-  if (length(valid_quarters) == 0) {
+  valid_quarters <- features |>
+    dplyr::filter(.data$quarter_end >= valid_start,
+                  !is.na(.data$volume_Mt)) |>
+    dplyr::distinct(.data$quarter_end) |>
+    dplyr::arrange(.data$quarter_end) |>
+    dplyr::pull(.data$quarter_end)
+
+  if (length(valid_quarters) == 0L) {
     log_warn("backtest_rmse: no validation quarters available")
     return(tibble::tibble(
+      commodity      = character(),
       quarter_end    = as.Date(character()),
       actual         = double(),
       point_estimate = double(),
@@ -58,79 +45,102 @@ backtest_rmse <- function(features, abs_5302, cfg) {
   }
 
   out <- purrr::map_dfr(valid_quarters, function(q) {
-    backtest_one_quarter(q, features, actuals, deflators, cfg)
+    backtest_one_quarter(q, features, commodities, cfg)
   })
 
-  log_info(
-    "backtest_rmse: %d quarters; RMSE=%.2f naive=%.2f",
-    nrow(out),
-    sqrt(mean(out$err^2, na.rm = TRUE)),
-    sqrt(mean(out$err_naive^2, na.rm = TRUE))
-  )
+  per_com <- out |>
+    dplyr::group_by(.data$commodity) |>
+    dplyr::summarise(
+      rmse_model = sqrt(mean(.data$err^2,       na.rm = TRUE)),
+      rmse_naive = sqrt(mean(.data$err_naive^2, na.rm = TRUE)),
+      .groups    = "drop"
+    )
+  for (i in seq_len(nrow(per_com))) {
+    log_info(
+      "backtest_rmse[%s]: RMSE_model=%.1f RMSE_naive=%.1f ratio=%.2f",
+      per_com$commodity[i], per_com$rmse_model[i], per_com$rmse_naive[i],
+      per_com$rmse_model[i] / per_com$rmse_naive[i]
+    )
+  }
+
   out
 }
 
-#' Backtest a single quarter -- isolated for unit testing
+#' Backtest a single quarter across all commodities -- exposed for testing
 #' @keywords internal
-backtest_one_quarter <- function(q, features, actuals, deflators, cfg) {
-  train_end_m <- lubridate::floor_date(q, "quarter") - 1
-
-  train_features <- dplyr::filter(features, .data$month_end <= train_end_m)
+backtest_one_quarter <- function(q, features, commodities, cfg) {
+  train_end <- q - 1L
   train_cfg <- cfg
-  train_cfg$sample$train_end <- as.character(train_end_m)
+  train_cfg$sample$train_end <- as.character(train_end)
+
+  train_features <- dplyr::filter(features, .data$quarter_end <= train_end)
   fits <- fit_bridge(train_features, train_cfg)
   fits <- fits[!vapply(fits, is.null, logical(1))]
-  if (length(fits) == 0) {
-    return(empty_backtest_row(q, actuals))
-  }
 
-  pred_months <- seq(lubridate::floor_date(q, "quarter"), q, by = "month") |>
-    lubridate::ceiling_date("month") - 1
-  pred_frame <- features |>
-    dplyr::filter(.data$month_end %in% pred_months,
-                  .data$commodity %in% names(fits))
+  purrr::map_dfr(commodities, function(com) {
+    actual <- features |>
+      dplyr::filter(.data$commodity == com, .data$quarter_end == q) |>
+      dplyr::pull(.data$volume_Mt)
+    actual <- if (length(actual) == 0L) NA_real_ else actual[1]
 
-  if (nrow(pred_frame) == 0) return(empty_backtest_row(q, actuals))
+    q_minus4 <- q - lubridate::years(1L)
+    q_minus4 <- lubridate::ceiling_date(q_minus4, "quarter") - 1
+    actual_q_minus4 <- features |>
+      dplyr::filter(.data$commodity == com, .data$quarter_end == q_minus4) |>
+      dplyr::pull(.data$volume_Mt)
+    actual_q_minus4 <- if (length(actual_q_minus4) == 0L) NA_real_ else actual_q_minus4[1]
 
-  preds_monthly <- predict_bridge(fits, pred_frame)
+    if (is.null(fits[[com]])) {
+      return(tibble::tibble(
+        commodity      = com,
+        quarter_end    = q,
+        actual         = actual,
+        point_estimate = NA_real_,
+        naive_srw      = actual_q_minus4,
+        err            = NA_real_,
+        err_naive      = actual_q_minus4 - actual
+      ))
+    }
 
-  pred_curr <- preds_monthly |>
-    dplyr::group_by(quarter_end = q) |>
-    dplyr::summarise(value_current_aud_m = sum(.data$yhat_aud_m, na.rm = TRUE),
-                     .groups = "drop")
+    pred_row <- dplyr::filter(features,
+                              .data$commodity == com,
+                              .data$quarter_end == q)
+    if (nrow(pred_row) == 0L) {
+      return(tibble::tibble(
+        commodity = com, quarter_end = q, actual = actual,
+        point_estimate = NA_real_, naive_srw = actual_q_minus4,
+        err = NA_real_, err_naive = actual_q_minus4 - actual
+      ))
+    }
 
-  pred_cv <- apply_chain_volume(pred_curr, deflators, lookback = 4L)
+    # Feature row carries both aggregate and per-month YoY-ΔT. Require
+    # log_volume_lag4 plus the RHS family for the chosen spec.
+    spec <- tolower(cfg$bridge$spec[[com]] %||% "aggregate")
+    rhs_cols <- if (spec == "midas") {
+      c("yoy_log_tonnage_m1", "yoy_log_tonnage_m2", "yoy_log_tonnage_m3")
+    } else {
+      "yoy_log_tonnage"
+    }
+    if (is.na(pred_row$log_volume_lag4[1]) ||
+        any(is.na(pred_row[1, rhs_cols]))) {
+      return(tibble::tibble(
+        commodity = com, quarter_end = q, actual = actual,
+        point_estimate = NA_real_, naive_srw = actual_q_minus4,
+        err = NA_real_, err_naive = actual_q_minus4 - actual
+      ))
+    }
 
-  actual_q <- dplyr::filter(actuals, .data$quarter_end == q)$actual
-  if (length(actual_q) == 0) actual_q <- NA_real_
-  actual_q_minus4 <- dplyr::filter(actuals,
-                                   .data$quarter_end == q - months(12))$actual
-  if (length(actual_q_minus4) == 0) actual_q_minus4 <- NA_real_
+    point_log <- predict_bridge(fits[com], pred_row)$yhat_log[1]
+    point <- exp(point_log)
 
-  point <- pred_cv$value_chainvol_aud_m[1]
-  tibble::tibble(
-    quarter_end    = q,
-    actual         = actual_q,
-    point_estimate = point,
-    naive_srw      = actual_q_minus4,
-    err            = point - actual_q,
-    err_naive      = actual_q_minus4 - actual_q
-  )
-}
-
-#' @keywords internal
-empty_backtest_row <- function(q, actuals) {
-  actual_q <- dplyr::filter(actuals, .data$quarter_end == q)$actual
-  if (length(actual_q) == 0) actual_q <- NA_real_
-  actual_q_minus4 <- dplyr::filter(actuals,
-                                   .data$quarter_end == q - months(12))$actual
-  if (length(actual_q_minus4) == 0) actual_q_minus4 <- NA_real_
-  tibble::tibble(
-    quarter_end    = q,
-    actual         = actual_q,
-    point_estimate = NA_real_,
-    naive_srw      = actual_q_minus4,
-    err            = NA_real_,
-    err_naive      = actual_q_minus4 - actual_q
-  )
+    tibble::tibble(
+      commodity      = com,
+      quarter_end    = q,
+      actual         = actual,
+      point_estimate = point,
+      naive_srw      = actual_q_minus4,
+      err            = point - actual,
+      err_naive      = actual_q_minus4 - actual
+    )
+  })
 }

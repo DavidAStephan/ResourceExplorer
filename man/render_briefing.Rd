@@ -2,12 +2,12 @@
 % Please edit documentation in R/outputs.R
 \name{render_briefing}
 \alias{render_briefing}
-\title{Render the Quarto briefing to HTML + PDF}
+\title{Render the briefing to HTML via rmarkdown}
 \usage{
-render_briefing(qmd_path, nowcast_current, csv_exports, cfg)
+render_briefing(rmd_path, nowcast_current, csv_exports, cfg)
 }
 \arguments{
-\item{qmd_path}{Path to the \code{briefing.qmd} source.}
+\item{rmd_path}{Path to the \code{briefing.Rmd} source.}
 
 \item{nowcast_current}{Dependency object (triggers rebuild).}
 
@@ -19,10 +19,5 @@ render_briefing(qmd_path, nowcast_current, csv_exports, cfg)
 Character vector of rendered output paths, invisibly.
 }
 \description{
-Calls \code{quarto::quarto_render()} with explicit parameters so the
-briefing reads from the configured \verb{outputs/} and \code{warehouse}. Both
-HTML and PDF are rendered into the briefing directory next to the
-source \code{.qmd}. If Quarto isn't installed, logs a warning and returns
-the \code{.qmd} path -- the pipeline doesn't fail just because of a local
-Quarto gap.
+Calls \code{rmarkdown::render()} with explicit params.
 }

@@ -2,44 +2,42 @@
 % Please edit documentation in R/features.R
 \name{build_features}
 \alias{build_features}
-\title{Build the monthly feature matrix for the bridge regressions}
+\title{Build the quarterly feature panel for per-commodity volume bridges}
 \usage{
-build_features(portwatch, abs_5368, fred, ports_meta, sitc_xw, cfg)
+build_features(portwatch, abs_5302, cfg)
 }
 \arguments{
 \item{portwatch}{Daily tonnage tibble from \code{\link[=fetch_portwatch_tonnage]{fetch_portwatch_tonnage()}}.}
 
-\item{abs_5368}{Monthly ABS tibble from \code{\link[=fetch_abs_5368]{fetch_abs_5368()}}.}
-
-\item{fred}{Price tibble from \code{\link[=fetch_fred_prices]{fetch_fred_prices()}}.}
-
-\item{ports_meta}{Tibble from \code{\link[=load_ports_metadata]{load_ports_metadata()}}.}
-
-\item{sitc_xw}{Tibble from \code{\link[=load_sitc_crosswalk]{load_sitc_crosswalk()}}.}
+\item{abs_5302}{Quarterly chain-volume tibble from \code{\link[=fetch_abs_5302]{fetch_abs_5302()}}.}
 
 \item{cfg}{Config list.}
 }
 \value{
-Tibble with columns:
-\code{commodity}, \code{month_end}, \code{y_aud_m}, \code{tonnage}, \code{tonnage_sa},
-\code{price}, \code{log_y}, \code{log_tonnage_sa}, \code{log_price}, \code{log_y_lag1}.
+Tibble keyed by \verb{(commodity, quarter_end)}.
 }
 \description{
-Produces a long tibble keyed by (\code{commodity}, \code{month_end}) with all
-the columns the bridge model needs. The work is:
+One row per (\code{commodity}, \code{quarter_end}) with everything a quarterly
+bridge needs:
 }
 \details{
-\enumerate{
-\item Aggregate PortWatch daily tonnage to monthly, rolled up to our
-commodity short-list via \code{ports_meta$commodity_class}.
-\item Filter ABS 5368.0 monthly to each commodity's SITC codes (per the
-crosswalk), sum across codes, and use the SA series when ABS
-publishes one (so downstream fits see a cleaner y).
-\item X-13 seasonally adjust the monthly tonnage series per commodity
-(PortWatch is raw; ABS LHS is already SA).
-\item Resample FRED monthly commodity prices, align to the commodity.
-\item Build the "other" bucket by residual: \code{y_other = y_total - y_named}.
-\item Compute log transforms and the AR(1) lag \code{log_y_lag1} (lag of the
-\emph{dependent} variable, on a per-commodity basis, SA where available).
+\tabular{ll}{
+   column \tab meaning \cr
+   \code{commodity} \tab one of \code{iron_ore}, \code{coal}, \code{lng} \cr
+   \code{quarter_end} \tab last day of the quarter \cr
+   \code{volume_chainvol_aud_m} \tab LHS target from ABS 5302 T25 (chain-volume A$m) \cr
+   \code{tonnage} \tab RHS: quarterly PortWatch tonnage sum (tonnes) \cr
+   \code{tonnage_sa} \tab STL seasonally-adjusted quarterly tonnage \cr
+   \code{log_volume} \tab log of LHS \cr
+   \code{log_tonnage} \tab log of raw tonnage \cr
+   \code{log_tonnage_sa} \tab log of SA tonnage (RHS used in bridge) \cr
+   \code{log_volume_lag1} \tab AR(1) lag of \code{log_volume} per commodity \cr
 }
+
+
+This is a deliberate simplification of the earlier monthly /
+price-denominated feature matrix: no FRED prices, no ABS 5368 value,
+no residual "other" bucket. See
+\verb{~/.claude/projects/-Users-davidstephan-Documents-ResourceTracker/memory/project_target_series.md}
+for the brief that drove the pivot.
 }

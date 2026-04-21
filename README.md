@@ -16,154 +16,109 @@ uncertainty bands that shrink as the current quarter is observed.
 | Requirement | Version | Notes |
 |---|---|---|
 | R | ≥ 4.2 | `Depends` in `DESCRIPTION` |
-| `renv` | latest | Installed once, locks all other deps |
-| Quarto CLI | ≥ 1.4 | Needed to render the briefing — install from <https://quarto.org> |
-| LaTeX | any | Needed for PDF output. `tinytex::install_tinytex()` works |
 | FRED API key | free | Register at <https://fred.stlouisfed.org/docs/api/api_key.html> |
 
-X-13-ARIMA-SEATS ships pre-built via the `x13binary` package — no
-manual install needed.
-
----
+No compiled / DLL dependencies beyond what a stock CRAN R install
+provides — the pipeline runs on locked-down work machines that block
+DuckDB, X-13-ARIMA-SEATS, and similar native libraries.
 
 ## One-time setup
 
 ```r
-# 1. Clone and enter the repo, then from R:
-install.packages("renv")
-renv::init()              # scans DESCRIPTION, installs everything
-renv::restore()           # if renv.lock is committed
+install.packages(c(
+  "dplyr", "fredr", "fs", "httr2", "jsonlite", "lubridate", "purrr",
+  "readabs", "readr", "rlang", "rmarkdown", "stringr", "tibble", "tidyr"
+))
+# Optional (briefing + dashboard + tests):
+install.packages(c("ggplot2", "knitr", "shiny", "testthat", "withr"))
 
-# 2. Secrets
 file.copy(".Renviron.example", ".Renviron")
-# Edit .Renviron, fill in FRED_API_KEY=..., save, then:
-readRenviron(".Renviron")
-
-# 3. Regenerate NAMESPACE from roxygen (only after editing R/)
-devtools::document()
+# Edit .Renviron, set FRED_API_KEY=..., save.
 ```
-
----
 
 ## Running the pipeline
 
-```r
-targets::tar_make()
+```bash
+Rscript run.R               # normal run, skip steps whose rds is up-to-date
+Rscript run.R --force       # force rerun of every step
+Rscript run.R --no-report   # skip the briefing HTML render
 ```
 
-What this does:
+What it does (see [`run.R`](run.R)):
 
-1. Loads `config.yml` and initialises the logger (`logs/YYYY-MM-DD.log`).
-2. Creates `data/warehouse.duckdb` with `raw.*` and `mart.*` schemas.
-3. Loads port metadata and the SITC crosswalk into the warehouse.
+1. Loads `config.R` and initialises the dated file logger (`logs/YYYY-MM-DD.log`).
+2. Creates the rds-backed warehouse under `data/warehouse/`.
+3. Loads port metadata + SITC crosswalk.
 4. Pulls PortWatch tonnage, ABS 5368.0 / 5302.0, and FRED prices —
-   each with retry + RDS cache fallback (`data/cache/<source>/…`).
-5. Builds the monthly feature panel, X-13 seasonally adjusts tonnage.
-6. Fits bridge regressions (log-levels + AR(1) + HAC SEs), runs the
-   walk-forward backtest vs a seasonal-random-walk benchmark.
-7. Computes the running nowcast with 80/95 bootstrap bands, flags
-   anomalies, writes a row to `mart.nowcast_history`.
-8. Writes the four CSV artefacts to `outputs/` and renders the
-   Quarto briefing to `reports/briefing/briefing.{html,pdf}`.
+   each with retry + RDS cache fallback under `data/cache/<source>/`.
+5. Builds the monthly feature panel, STL-adjusts tonnage for seasonality.
+6. Fits bridge regressions (log-levels + AR(1) + Newey-West HAC SEs via
+   the local `nw_vcov()`), runs a walk-forward backtest vs a
+   seasonal-random-walk benchmark.
+7. Computes the running nowcast with 80 / 95 bootstrap bands, flags
+   anomalies, appends a row to `mart_nowcast_history`.
+8. Writes four CSVs to `outputs/` and renders the briefing to
+   `reports/briefing/briefing.html`.
 
-Total runtime target: under 5 minutes on a warm cache.
+Total runtime target: well under a minute on a warm cache.
 
-### Run offline (with stale cache)
-
-```r
-targets::tar_make()   # same command; if a fetch fails, we use the
-                      # last successful cache and tag the tibble
-                      # with attr(x, "cache_status") = "stale".
-```
-
-### Inspect the DAG
-
-```r
-targets::tar_visnetwork()
-```
-
----
-
-## Running the dashboard
-
-From the repo root:
+## Dashboard
 
 ```r
 shiny::runApp("reports/dashboard")
 ```
 
-The dashboard reads from `outputs/*.csv` and `data/warehouse.duckdb`
-with paths hard-coded relative to the app directory — always launch
-from the repo root.
-
----
+The dashboard reads `outputs/*.csv` and rds tables from
+`data/warehouse/`; always launch from the repo root.
 
 ## Tests
 
 ```r
-devtools::test()             # full suite
-devtools::test_active_file() # single file, from RStudio
-devtools::check()            # R CMD check; zero errors expected
+testthat::test_dir("tests/testthat")
 ```
-
-Tests that hit the real X-13 binary skip if `{seasonal}` isn't
-available. HTTP-level tests use `{httptest2}` and ship with fixtures.
-
----
 
 ## Directory layout
 
 ```
 resourcetracker/
 ├── R/                       # package source
-├── inst/
-│   ├── extdata/             # ports_metadata.csv, sitc_crosswalk.csv
-│   └── sql/schema.sql       # DuckDB DDL (idempotent)
+├── inst/extdata/            # ports_metadata.csv, sitc_crosswalk.csv
 ├── tests/testthat/          # unit + integration tests
 ├── reports/
-│   ├── briefing/briefing.qmd
+│   ├── briefing/briefing.Rmd
 │   └── dashboard/app.R
-├── _targets.R               # pipeline DAG
-├── config.yml               # paths, series IDs, SITC map, bootstrap
+├── run.R                    # orchestrator (replaces _targets.R)
+├── config.R                 # paths, series IDs, SITC map, bootstrap
 ├── DESCRIPTION / NAMESPACE  # package metadata
-├── data/                    # gitignored — warehouse + cache
-├── outputs/                 # gitignored — run artefacts
-├── logs/                    # gitignored — dated run logs
+├── data/                    # gitignored -- warehouse + cache
+├── outputs/                 # gitignored -- run artefacts
+├── logs/                    # gitignored -- dated run logs
 └── docs/METHODOLOGY.md      # econometric writeup
 ```
-
----
 
 ## Troubleshooting
 
 **`Error: FRED_API_KEY not set` and a stale cache warning.**
-Either fill in `.Renviron` or accept that FRED data is frozen at the
-last successful pull.
+Fill in `.Renviron`, or accept that FRED data is frozen at the last
+successful pull.
 
-**PortWatch HTTP 404 on first run.**
-The IMF occasionally moves the FeatureServer layer ID. Override via
-`Sys.setenv(PORTWATCH_BASE_URL = "https://.../FeatureServer/<new-id>")`
-or edit `config.yml`. The JSON parser isolates field-name handling in
-`parse_portwatch_features()` — adjust the `pick()` fallback list if
-the IMF renames columns.
+**PortWatch fetch returns 0 rows.**
+The default FeatureServer layer ID in `config.R` is a Phase-1
+placeholder and must be replaced with the live IMF PortWatch endpoint.
+Override via `Sys.setenv(PORTWATCH_BASE_URL = "https://.../FeatureServer/<id>")`
+or edit `config.R` directly. The JSON parser isolates field-name
+handling in `parse_portwatch_features()` — extend the `pick()`
+fallback list if IMF renames columns.
 
-**`quarto not found on PATH` warning.**
-Install Quarto from <https://quarto.org>. The pipeline doesn't fail
-without it — the CSV artefacts still land in `outputs/`, only the
-briefing skips.
+**Briefing render fails with `pandoc version ... not found`.**
+Install pandoc (ships with RStudio; `rmarkdown::pandoc_available()`
+tells you whether it's on PATH). The CSV artefacts still land even if
+the render step fails.
 
-**X-13 fails on a commodity.**
-X-13 refuses series shorter than 36 months. `x13_adjust()` falls back
-to the raw series with a warning — check the log for which commodity.
-
-**`LaTeX Error: File ... not found` during briefing render.**
-Run `tinytex::install_tinytex()` once, then re-run `tar_make()`.
-
-**`no cache available` error during `tar_make()`.**
-First run, no network, and the cache is empty. Run once with a
-connection to populate, then offline runs will work.
-
----
+**`no cache available` error.**
+First run with no network and no seeded cache. Run once with
+connectivity so each source populates its cache, then offline runs
+will fall back cleanly.
 
 ## Data ethics & redistribution
 

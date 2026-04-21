@@ -13,8 +13,16 @@ init_logger(cfg)
 Invisibly, the path of the current log file.
 }
 \description{
-Configures \code{{logger}} to write to both stdout and a dated log file in
-the configured logs directory. Safe to call repeatedly -- each call
-replaces the previous appender configuration.
+Configures the built-in base-R logger to write to both stderr and a
+dated log file in \code{cfg$paths$logs}. Safe to call repeatedly.
+}
+\details{
+Replaced the \code{{logger}} package (not on the work-laptop allow-list)
+with a small hand-rolled logger that keeps the same call-site surface
+(\code{log_info}, \code{log_warn}, \code{log_error}, \code{log_debug}, \code{log_trace}).
+
+Messages are \code{sprintf}-formatted: pass a format string and values as
+additional args. No \code{glue}-style interpolation (keeps dependencies
+trivial). Level precedence TRACE < DEBUG < INFO < WARN < ERROR.
 }
 \keyword{internal}

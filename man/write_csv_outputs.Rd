@@ -2,7 +2,7 @@
 % Please edit documentation in R/outputs.R
 \name{write_csv_outputs}
 \alias{write_csv_outputs}
-\title{Write CSV exports to \verb{outputs/}}
+\title{Write per-commodity CSV exports to \verb{outputs/}}
 \usage{
 write_csv_outputs(
   nowcast_current,
@@ -13,9 +13,9 @@ write_csv_outputs(
 )
 }
 \arguments{
-\item{nowcast_current}{One-row tibble from \code{\link[=run_nowcast]{run_nowcast()}}.}
+\item{nowcast_current}{Tibble from \code{\link[=run_nowcast]{run_nowcast()}} (one row per commodity).}
 
-\item{portwatch}{Daily tonnage tibble.}
+\item{portwatch}{Daily tonnage tibble from \code{\link[=fetch_portwatch_tonnage]{fetch_portwatch_tonnage()}}.}
 
 \item{bridge_fits}{Output of \code{\link[=fit_bridge]{fit_bridge()}}.}
 
@@ -24,10 +24,16 @@ write_csv_outputs(
 \item{cfg}{Config list.}
 }
 \value{
-Invisibly, a character vector of file paths written.
+Invisibly, a named character vector of file paths written.
 }
 \description{
-Writes the four artefact CSVs named in the brief. In Phase 1 all
-inputs are empty, so this produces header-only CSVs -- confirming
-schemas flow through the DAG.
+Four artefacts, all keyed by commodity:
+}
+\details{
+\itemize{
+\item \code{nowcast_current.csv} — one row per commodity: point + 80/95 bands
+\item \code{tonnage_daily.csv}   — raw PortWatch daily panel (filtered to named commodities)
+\item \code{tonnage_quarterly.csv} — aggregated quarterly tonnage per commodity
+\item \code{bridge_diagnostics.csv} — one row per commodity: R², DW, β_T, RMSEs
+}
 }

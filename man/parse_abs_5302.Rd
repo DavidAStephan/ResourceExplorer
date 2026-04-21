@@ -2,14 +2,12 @@
 % Please edit documentation in R/ingest_abs.R
 \name{parse_abs_5302}
 \alias{parse_abs_5302}
-\title{Parse 5302.0 output into quarterly goods-credits rows}
+\title{Parse ABS 5302 Table 25 raw tibble into a commodity-keyed long tibble}
 \usage{
-parse_abs_5302(raw)
+parse_abs_5302(raw, cfg)
 }
 \description{
-Keeps both current-price (\code{value_current_aud_m}) and chain-volume
-(\code{value_chainvol_aud_m}) series, pivoted so each quarter_end has one
-row per series_id. The chain-volume series is the nowcast target;
-current-price is kept for the implicit-deflator calc in Phase 4.
+Filters to the three configured \code{series_ids}, attaches the commodity
+label from the reverse map, and aligns dates to quarter-end.
 }
 \keyword{internal}

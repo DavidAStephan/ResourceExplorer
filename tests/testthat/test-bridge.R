@@ -1,86 +1,129 @@
-## Bridge-regression tests.
-##
-## We simulate a known DGP with y = α + β₁·logT + β₂·logP + β₃·lag(logy) + ε
-## and verify that fit_bridge recovers the coefficients within tolerance.
-## This is a strong correctness check that doesn't require real ABS/PortWatch
-## data.
+## Bridge-regression tests. Covers both `aggregate` and `midas` specs.
 
-simulate_features <- function(n = 72, seed = 20260419, commodity = "iron_ore") {
+simulate_features <- function(n_q = 40, seed = 20260419,
+                              commodity = "iron_ore") {
   set.seed(seed)
-  tonnage <- exp(10 + 0.01 * seq_len(n) + stats::rnorm(n, 0, 0.1))
-  price   <- exp(4  + 0.02 * seq_len(n) + stats::rnorm(n, 0, 0.1))
-  log_y   <- numeric(n)
-  log_y[1] <- log(1000)
-  beta0 <- 2; b_t <- 0.9; b_p <- 1.1; b_l <- 0.3
-  for (i in 2:n) {
-    log_y[i] <- beta0 + b_t * log(tonnage[i]) + b_p * log(price[i]) +
-                b_l * log_y[i - 1] + stats::rnorm(1, 0, 0.05)
+  mwq_intercepts <- c(log(80e6), log(70e6), log(75e6))
+  log_T_m <- vapply(seq_len(n_q), function(q) {
+    trend <- 0.01 * q
+    vapply(1:3, function(m) {
+      mwq_intercepts[m] + trend + stats::rnorm(1, 0, 0.04)
+    }, numeric(1))
+  }, numeric(3))
+
+  log_vol <- numeric(n_q)
+  log_vol[1:4] <- log(c(220, 230, 235, 245)) + stats::rnorm(4, 0, 0.02)
+  b <- c(0.3, 0.2, 0.1)
+  for (q in 5:n_q) {
+    yoy_dT <- log_T_m[, q] - log_T_m[, q - 4]
+    log_vol[q] <- 0.0 + sum(b * yoy_dT) + 1.0 * log_vol[q - 4] +
+                   stats::rnorm(1, 0, 0.02)
   }
+
   tibble::tibble(
-    commodity      = commodity,
-    month_end      = seq(as.Date("2018-01-01"), by = "month", length.out = n) |>
-                       (\(d) lubridate::ceiling_date(d, "month") - 1)(),
-    y_aud_m        = exp(log_y),
-    tonnage        = tonnage,
-    tonnage_sa     = tonnage,
-    price          = price,
-    log_y          = log_y,
-    log_tonnage_sa = log(tonnage),
-    log_price      = log(price),
-    log_y_lag1     = dplyr::lag(log_y)
-  )
+    commodity          = commodity,
+    quarter_end        = seq(as.Date("2015-01-01"), by = "3 months",
+                              length.out = n_q) |>
+                         (\(d) lubridate::ceiling_date(d, "quarter") - 1)(),
+    volume_Mt          = exp(log_vol),
+    tonnage_m1         = exp(log_T_m[1, ]),
+    tonnage_m2         = exp(log_T_m[2, ]),
+    tonnage_m3         = exp(log_T_m[3, ]),
+    tonnage            = exp(log_T_m[1, ]) + exp(log_T_m[2, ]) +
+                         exp(log_T_m[3, ])
+  ) |>
+    dplyr::mutate(
+      log_volume         = log(volume_Mt),
+      log_tonnage        = log(tonnage),
+      log_tonnage_m1     = log(tonnage_m1),
+      log_tonnage_m2     = log(tonnage_m2),
+      log_tonnage_m3     = log(tonnage_m3),
+      log_volume_lag4    = dplyr::lag(log_volume,     4L),
+      yoy_log_tonnage    = log_tonnage    - dplyr::lag(log_tonnage,    4L),
+      yoy_log_tonnage_m1 = log_tonnage_m1 - dplyr::lag(log_tonnage_m1, 4L),
+      yoy_log_tonnage_m2 = log_tonnage_m2 - dplyr::lag(log_tonnage_m2, 4L),
+      yoy_log_tonnage_m3 = log_tonnage_m3 - dplyr::lag(log_tonnage_m3, 4L)
+    )
 }
 
-test_that("fit_bridge recovers known DGP coefficients within tolerance", {
-  feats <- simulate_features(n = 96)
-  cfg <- list(
-    sample = list(train_end = "2023-12-31"),
-    commodities = "iron_ore"
-  )
+test_that("fit_bridge/midas recovers per-month coefficients", {
+  feats <- simulate_features(n_q = 40)
+  cfg <- list(sample = list(train_end = "2030-12-31"),
+              commodities = "iron_ore",
+              bridge = list(hac_lag = 1L, min_n = 12L,
+                            spec = list(iron_ore = "midas")))
   fits <- fit_bridge(feats, cfg)
   expect_named(fits, "iron_ore")
+  expect_equal(fits$iron_ore$diagnostics$spec, "midas")
 
   co <- stats::coef(fits$iron_ore$fit)
-  expect_equal(co[["log_tonnage_sa"]], 0.9, tolerance = 0.1)
-  expect_equal(co[["log_price"]],      1.1, tolerance = 0.1)
-  expect_equal(co[["log_y_lag1"]],     0.3, tolerance = 0.1)
-
-  diag <- fits$iron_ore$diagnostics
-  expect_gt(diag$r_squared, 0.9)
-  expect_true(diag$dw_stat > 1 && diag$dw_stat < 3)
+  expect_equal(unname(co[["yoy_log_tonnage_m1"]] +
+                      co[["yoy_log_tonnage_m2"]] +
+                      co[["yoy_log_tonnage_m3"]]), 0.6, tolerance = 0.25)
+  expect_equal(co[["log_volume_lag4"]], 1.0, tolerance = 0.15)
+  expect_gt(fits$iron_ore$diagnostics$r_squared, 0.5)
 })
 
-test_that("predict_bridge is recursive — h-step uses predicted lag", {
-  feats <- simulate_features(n = 96)
-  cfg <- list(sample = list(train_end = "2023-12-31"),
-              commodities = "iron_ore")
+test_that("fit_bridge/aggregate picks up sum-of-monthly signal", {
+  feats <- simulate_features(n_q = 40)
+  cfg <- list(sample = list(train_end = "2030-12-31"),
+              commodities = "iron_ore",
+              bridge = list(hac_lag = 1L, min_n = 12L,
+                            spec = list(iron_ore = "aggregate")))
   fits <- fit_bridge(feats, cfg)
+  expect_named(fits, "iron_ore")
+  expect_equal(fits$iron_ore$diagnostics$spec, "aggregate")
 
-  newdata <- feats |>
-    dplyr::filter(.data$month_end >= as.Date("2024-01-31"),
-                  .data$month_end <= as.Date("2024-03-31"))
-
-  preds <- predict_bridge(fits, newdata)
-  expect_equal(nrow(preds), 3)
-  expect_true(all(is.finite(preds$yhat_log)))
-
-  # Confirm month 2's log_y_lag1 input was month 1's prediction, not the
-  # observed lag passed in. Compare: manually recompute using fitted
-  # coefficients + observed lag and check it DIFFERS from predict_bridge's
-  # output for month 2+.
   co <- stats::coef(fits$iron_ore$fit)
-  manual_month2 <- co["(Intercept)"] +
-    co["log_tonnage_sa"] * newdata$log_tonnage_sa[2] +
-    co["log_price"]      * newdata$log_price[2] +
-    co["log_y_lag1"]     * newdata$log_y_lag1[2]   # observed, not predicted
-  expect_false(isTRUE(all.equal(preds$yhat_log[2],
-                                as.numeric(manual_month2))))
+  expect_true("yoy_log_tonnage" %in% names(co))
+  # Aggregate picks up sum-of-monthly ΔT signal; coefficient should be
+  # positive (not necessarily equal to DGP sum because aggregator and
+  # DGP differ -- sum of logs vs log of sum).
+  expect_gt(co[["yoy_log_tonnage"]], 0)
+  expect_equal(co[["log_volume_lag4"]], 1.0, tolerance = 0.15)
+})
+
+test_that("fit_bridge defaults to aggregate spec when cfg missing", {
+  feats <- simulate_features(n_q = 40)
+  cfg <- list(sample = list(train_end = "2030-12-31"),
+              commodities = "iron_ore",
+              bridge = list(hac_lag = 1L, min_n = 12L))  # no spec
+  fits <- fit_bridge(feats, cfg)
+  expect_equal(fits$iron_ore$diagnostics$spec, "aggregate")
+})
+
+test_that("predict_bridge works for both specs", {
+  feats <- simulate_features(n_q = 40)
+  newdata <- feats |> utils::tail(4)
+  for (s in c("aggregate", "midas")) {
+    cfg <- list(sample = list(train_end = "2030-12-31"),
+                commodities = "iron_ore",
+                bridge = list(hac_lag = 1L, min_n = 12L,
+                              spec = list(iron_ore = s)))
+    fits <- fit_bridge(feats, cfg)
+    preds <- predict_bridge(fits, newdata)
+    expect_equal(nrow(preds), 4L, info = s)
+    expect_true(all(is.finite(preds$yhat_log)), info = s)
+  }
 })
 
 test_that("fit_bridge skips commodities with too few observations", {
-  feats <- simulate_features(n = 18)
-  cfg <- list(sample = list(train_end = "2023-12-31"),
-              commodities = "iron_ore")
+  feats <- simulate_features(n_q = 10)
+  cfg <- list(sample = list(train_end = "2030-12-31"),
+              commodities = "iron_ore",
+              bridge = list(hac_lag = 1L, min_n = 12L,
+                            spec = list(iron_ore = "midas")))
+  fits <- fit_bridge(feats, cfg)
+  expect_null(fits$iron_ore)
+})
+
+test_that("fit_bridge skips commodities with degenerate regressors", {
+  feats <- simulate_features(n_q = 24)
+  feats$yoy_log_tonnage <- 0
+  cfg <- list(sample = list(train_end = "2030-12-31"),
+              commodities = "iron_ore",
+              bridge = list(hac_lag = 1L, min_n = 12L,
+                            spec = list(iron_ore = "aggregate")))
   fits <- fit_bridge(feats, cfg)
   expect_null(fits$iron_ore)
 })

@@ -1,12 +1,12 @@
-# Weekly pipeline run — disabled template.
+# Weekly pipeline run -- disabled template.
 #
 # To enable:
 #   1. Rename this file to `weekly.yml`
-#   2. Add repo secret FRED_API_KEY (Settings → Secrets → Actions)
+#   2. Add repo secret FRED_API_KEY (Settings -> Secrets -> Actions)
 #   3. Commit. The cron fires at 09:00 AEST every Tuesday and on
 #      workflow_dispatch.
 #
-# Outputs (CSVs, briefing PDF, dated log) are uploaded as an artifact
+# Outputs (CSVs, briefing HTML, dated log) are uploaded as an artifact
 # named `nowcast-outputs` and retained per repo retention policy.
 
 name: weekly-nowcast
@@ -26,12 +26,18 @@ jobs:
         with:
           r-version: "4.4"
 
-      - uses: r-lib/actions/setup-renv@v2
+      - name: Install R dependencies
+        run: |
+          Rscript -e 'install.packages(c(
+            "dplyr","fredr","fs","httr2","jsonlite","lubridate","purrr",
+            "readabs","readr","rlang","rmarkdown","stringr","tibble","tidyr",
+            "ggplot2","knitr","testthat","withr"
+          ), repos = "https://cloud.r-project.org")'
 
-      - name: Run targets pipeline
+      - name: Run pipeline
         env:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
-        run: Rscript -e 'targets::tar_make()'
+        run: Rscript run.R
 
       - name: Upload outputs
         uses: actions/upload-artifact@v4
@@ -39,5 +45,5 @@ jobs:
           name: nowcast-outputs
           path: |
             outputs/*.csv
-            reports/briefing/briefing.pdf
+            reports/briefing/briefing.html
             logs/

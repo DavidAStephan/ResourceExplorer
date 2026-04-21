@@ -19,8 +19,8 @@ load_config <- function(path = "config.R") {
     stop("config.R must have a list as its final expression", call. = FALSE)
   }
 
-  required <- c("paths", "sample", "commodities", "portwatch", "abs",
-                "fred", "nowcast", "logging")
+  required <- c("paths", "sample", "commodities", "portwatch", "disr",
+                "nowcast", "bridge", "logging")
   missing <- setdiff(required, names(cfg))
   if (length(missing)) {
     stop("config.R missing keys: ", paste(missing, collapse = ", "),

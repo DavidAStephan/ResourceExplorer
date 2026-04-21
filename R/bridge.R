@@ -1,40 +1,43 @@
-#' Fit per-commodity bridge regressions
+#' Fit per-commodity bridge regressions (per-commodity spec)
 #'
-#' **Specification.** For each commodity `c` we fit, on monthly data,
+#' **Two specifications, both with a year-ago LHS lag as the seasonal
+#' anchor.** Choice per commodity via `cfg$bridge$spec` (default:
+#' `"aggregate"` if unspecified).
 #'
-#' \deqn{\log y_{c,m} = \beta_0 + \beta_1 \log T^{SA}_{c,m} + \beta_2 \log P_{c,m} + \beta_3 \log y_{c,m-1} + \varepsilon_{c,m}}
+#' - **aggregate** (parsimonious, 3 params + intercept):
+#'   \deqn{\log V_{c,Q} = \beta_0 + \beta_T \, \Delta_{Q,Q-4}\log T_{c,Q} + \beta_4 \log V_{c,Q-4} + \varepsilon_{c,Q}}
 #'
-#' **Why log-levels rather than first-differences.** Australian
-#' commodity export values have persistent level shifts (the 2020-2022
-#' iron-ore spike, the 2022 LNG shock) that carry economically
-#' meaningful information. First-differencing throws those away. The
-#' trade-off is serial correlation in the residuals, which we handle
-#' two ways: (a) the AR(1) lag on `log_y` absorbs most of it at the
-#' conditional-mean level, and (b) Newey-West (HAC) standard errors
-#' with `lag = 3` keep inference honest on the remainder.
+#' - **midas** (flexible, 5 params + intercept):
+#'   \deqn{\log V_{c,Q} = \beta_0 + \sum_{m=1}^{3} \beta_m \, \Delta_{Q,Q-4}\log T_{c,Q,m} + \beta_4 \log V_{c,Q-4} + \varepsilon_{c,Q}}
 #'
-#' **Why AR(1) and not richer dynamics.** With a ~60-month training
-#' window per commodity, we have a single-digit parameter budget per
-#' bridge. One lag captures the bulk of the persistence and doubles as
-#' the "bridge" mechanism at nowcast time -- it lets partial-month
-#' observations of `log T` update `log y` through its own lagged value.
-#' Phase 4 can add further lags if residual diagnostics warrant.
+#' Why per-commodity: MIDAS wins when within-quarter monthly betas
+#' legitimately differ (iron_ore: β_m1 dominates — early-quarter
+#' shipping is a leading indicator). Aggregate wins when the monthly
+#' betas would be roughly equal (coal: all three near-equal, so the
+#' extra params just inflate variance). 2026-04-21 backtest showed
+#' iron_ore improves 5% under MIDAS and coal degrades 16%; split spec
+#' is best-of-both.
 #'
-#' **Why log on both sides.** Exports value = price x quantity, so
-#' taking logs makes the RHS additive in `log P` and `log T`. `beta_1`
-#' then reads as an elasticity of value with respect to tonnage --
-#' expected to be close to 1 for a commodity whose tonnage and value
-#' move together. Large deviations from 1 flag either mix-shifts in the
-#' commodity basket (coal 321 vs 322), measurement differences
-#' (PortWatch coverage gaps), or genuine unit-value swings.
+#' `V` is DISR REQ Table 16 physical quarterly tonnage (Mt); YoY
+#' differencing on the RHS mechanically strips seasonality so no
+#' X-13 / STL is applied. Newey-West HAC standard errors with
+#' `lag = cfg$bridge$hac_lag`.
 #'
-#' **Zero and missing values** are filtered out upstream in
-#' [build_features()] -- we don't have to handle them here.
+#' **Why no log price.** The target is already a *volume* measure
+#' (chain-volume, reference year 2022-23). Price effects are stripped
+#' on the LHS by construction; adding `log P` on the RHS would fit a
+#' coefficient the target has nothing to tie it to. Volume ~ tonnage is
+#' the relationship the bridge identifies.
 #'
-#' @param features Long tibble from [build_features()].
-#' @param cfg Config list. Uses `cfg$sample$train_end` to restrict the
-#'   estimation window (everything later is held out for Phase 4
-#'   backtesting / nowcasting).
+#' **Guardrails.**
+#' - Commodities with fewer than `cfg$bridge$min_n` training quarters
+#'   are skipped.
+#' - Any regressor (or LHS) with near-zero variance skips with a warning.
+#' - `nw_vcov()` failures (rare — usually singular design) skip.
+#'
+#' @param features Quarterly feature tibble from [build_features()].
+#' @param cfg Config list. Uses `cfg$sample$train_end`, `cfg$commodities`,
+#'   `cfg$bridge$hac_lag`, `cfg$bridge$min_n`.
 #' @return Named list keyed by commodity. Each element is a list with:
 #'   - `fit`: the `lm` object
 #'   - `vcov_hac`: Newey-West variance-covariance matrix
@@ -43,45 +46,118 @@
 #'     dw_stat, beta_tonnage, beta_tonnage_se)
 #' @export
 fit_bridge <- function(features, cfg) {
-  train_end <- as.Date(cfg$sample$train_end %||% "2023-12-31")
+  train_end   <- as.Date(cfg$sample$train_end %||% "2023-12-31")
   commodities <- cfg$commodities %||% unique(features$commodity)
+  hac_lag     <- as.integer(cfg$bridge$hac_lag %||% 1L)
+  min_n       <- as.integer(cfg$bridge$min_n   %||% 12L)
+  spec_map    <- cfg$bridge$spec %||% list()
 
   fits <- stats::setNames(vector("list", length(commodities)), commodities)
 
   for (com in commodities) {
-    dat <- features |>
-      dplyr::filter(.data$commodity == com, .data$month_end <= train_end) |>
-      dplyr::filter(!is.na(.data$log_y_lag1)) |>
-      dplyr::arrange(.data$month_end)
+    spec <- tolower(spec_map[[com]] %||% "aggregate")
+    if (!spec %in% c("aggregate", "midas")) {
+      log_warn("fit_bridge[%s]: unknown spec %q -- falling back to aggregate",
+               com, spec)
+      spec <- "aggregate"
+    }
 
-    if (nrow(dat) < 24) {
-      log_warn("fit_bridge[%s]: %d obs < 24 -- skipping", com, nrow(dat))
+    required_cols <- switch(
+      spec,
+      aggregate = c("log_volume", "log_volume_lag4", "yoy_log_tonnage"),
+      midas     = c("log_volume", "log_volume_lag4",
+                    "yoy_log_tonnage_m1", "yoy_log_tonnage_m2",
+                    "yoy_log_tonnage_m3")
+    )
+
+    dat <- features |>
+      dplyr::filter(.data$commodity == com,
+                    .data$quarter_end <= train_end) |>
+      dplyr::arrange(.data$quarter_end)
+    dat <- dat[stats::complete.cases(dat[, required_cols]), , drop = FALSE]
+
+    if (nrow(dat) < min_n) {
+      log_warn("fit_bridge[%s]: %d obs < min_n=%d -- skipping",
+               com, nrow(dat), min_n)
       fits[[com]] <- NULL
       next
     }
 
-    fit <- stats::lm(
-      log_y ~ log_tonnage_sa + log_price + log_y_lag1,
-      data = dat
+    vs <- vapply(required_cols,
+                 function(v) stats::sd(dat[[v]], na.rm = TRUE),
+                 numeric(1))
+    if (any(vs < 1e-8, na.rm = TRUE) || any(is.na(vs))) {
+      log_warn("fit_bridge[%s]: degenerate regressor (sd<1e-8) -- skipping",
+               com)
+      fits[[com]] <- NULL
+      next
+    }
+
+    formula_fit <- switch(
+      spec,
+      aggregate = log_volume ~ yoy_log_tonnage + log_volume_lag4,
+      midas     = log_volume ~ yoy_log_tonnage_m1 + yoy_log_tonnage_m2 +
+                               yoy_log_tonnage_m3 + log_volume_lag4
     )
-    vcov_hac <- nw_vcov(fit, lag = 3L, prewhite = FALSE)
-    res <- stats::residuals(fit)
+    fit <- stats::lm(formula_fit, data = dat)
+    vcov_hac <- tryCatch(
+      nw_vcov(fit, lag = hac_lag, prewhite = FALSE),
+      error = function(e) {
+        log_warn("fit_bridge[%s]: nw_vcov failed (%s) -- skipping",
+                 com, conditionMessage(e))
+        NULL
+      }
+    )
+    if (is.null(vcov_hac)) { fits[[com]] <- NULL; next }
+
+    res  <- stats::residuals(fit)
     yhat <- stats::fitted(fit)
+
+    co <- stats::coef(fit)
+    if (spec == "midas") {
+      idx <- c("yoy_log_tonnage_m1", "yoy_log_tonnage_m2",
+               "yoy_log_tonnage_m3")
+      beta_T    <- sum(co[idx])
+      beta_T_se <- sqrt(max(sum(vcov_hac[idx, idx]), 0))
+      beta_m1   <- unname(co["yoy_log_tonnage_m1"])
+      beta_m2   <- unname(co["yoy_log_tonnage_m2"])
+      beta_m3   <- unname(co["yoy_log_tonnage_m3"])
+    } else {
+      beta_T    <- unname(co["yoy_log_tonnage"])
+      beta_T_se <- sqrt(max(vcov_hac["yoy_log_tonnage",
+                                      "yoy_log_tonnage"], 0))
+      beta_m1 <- beta_m2 <- beta_m3 <- NA_real_
+    }
 
     diag <- tibble::tibble(
       commodity       = com,
+      spec            = spec,
       n_obs           = nrow(dat),
       r_squared       = summary(fit)$r.squared,
       rmse_train      = sqrt(mean(res^2)),
       dw_stat         = durbin_watson(res),
-      beta_tonnage    = unname(stats::coef(fit)["log_tonnage_sa"]),
-      beta_tonnage_se = sqrt(vcov_hac["log_tonnage_sa", "log_tonnage_sa"])
+      beta_tonnage    = unname(beta_T),
+      beta_tonnage_se = beta_T_se,
+      beta_lag4       = unname(co["log_volume_lag4"]),
+      beta_m1         = beta_m1,
+      beta_m2         = beta_m2,
+      beta_m3         = beta_m3
     )
 
-    log_info(
-      "fit_bridge[%s]: n=%d R^2=%.3f RMSE_train=%.3f beta_T=%.3f",
-      com, nrow(dat), diag$r_squared, diag$rmse_train, diag$beta_tonnage
-    )
+    if (spec == "midas") {
+      log_info(
+        "fit_bridge[%s/midas]: n=%d R^2=%.3f RMSE=%.3f betaT=%.3f lag4=%.3f (m1=%.2f m2=%.2f m3=%.2f)",
+        com, nrow(dat), diag$r_squared, diag$rmse_train,
+        diag$beta_tonnage, diag$beta_lag4,
+        diag$beta_m1, diag$beta_m2, diag$beta_m3
+      )
+    } else {
+      log_info(
+        "fit_bridge[%s/aggregate]: n=%d R^2=%.3f RMSE=%.3f betaT=%.3f lag4=%.3f",
+        com, nrow(dat), diag$r_squared, diag$rmse_train,
+        diag$beta_tonnage, diag$beta_lag4
+      )
+    }
 
     fits[[com]] <- list(
       fit         = fit,
@@ -94,19 +170,16 @@ fit_bridge <- function(features, cfg) {
   fits
 }
 
-#' Predict from fitted bridge models, recursively for multi-step ahead.
+#' Predict from fitted bridge models
 #'
-#' **Recursion matters.** Because `log_y_lag1` is on the RHS, a 3-month
-#' ahead forecast needs the 1- and 2-month-ahead predictions fed back
-#' in as lags. We iterate month-by-month, overwriting `log_y_lag1` in
-#' each step with the previous step's prediction.
+#' With a year-ago lag (`log_volume_lag4`), multi-step forecasts do NOT
+#' need recursion: quarter Q's lag is Q-4's OBSERVED volume, which is
+#' always known once it's landed. `newdata` must carry
+#' `yoy_log_tonnage_sa` and `log_volume_lag4` columns.
 #'
 #' @param fits Output of [fit_bridge()].
 #' @param newdata Long feature tibble for the horizon to predict.
-#'   Rows for each commodity must be sorted by `month_end` ascending
-#'   and **must include a `log_y_lag1` value for the first month**
-#'   (from the last observed actual).
-#' @return Tibble: `month_end`, `commodity`, `yhat_log`, `yhat_aud_m`.
+#' @return Tibble: `quarter_end`, `commodity`, `yhat_log`, `yhat_volume_Mt`.
 #' @export
 predict_bridge <- function(fits, newdata) {
   out <- list()
@@ -115,32 +188,23 @@ predict_bridge <- function(fits, newdata) {
     if (is.null(entry)) next
     dat <- newdata |>
       dplyr::filter(.data$commodity == com) |>
-      dplyr::arrange(.data$month_end)
+      dplyr::arrange(.data$quarter_end)
     if (nrow(dat) == 0) next
 
-    yhat_log <- numeric(nrow(dat))
-    prev_lag <- dat$log_y_lag1[1]
-    for (i in seq_len(nrow(dat))) {
-      row <- dat[i, , drop = FALSE]
-      row$log_y_lag1 <- prev_lag
-      yhat_log[i] <- as.numeric(stats::predict(entry$fit, newdata = row))
-      prev_lag <- yhat_log[i]
-    }
+    yhat_log <- as.numeric(stats::predict(entry$fit, newdata = dat))
 
     out[[com]] <- tibble::tibble(
-      month_end  = dat$month_end,
-      commodity  = com,
-      yhat_log   = yhat_log,
-      yhat_aud_m = exp(yhat_log)
+      quarter_end    = dat$quarter_end,
+      commodity      = com,
+      yhat_log       = yhat_log,
+      yhat_volume_Mt = exp(yhat_log)
     )
   }
   dplyr::bind_rows(out)
 }
 
 #' Durbin-Watson stat for a residual vector (no regression required).
-#'
-#' Avoids dragging in `{lmtest}` just for this. Values near 2 suggest
-#' no first-order autocorrelation; < 1 or > 3 is a red flag.
+#' Values near 2 suggest no first-order autocorrelation; < 1 or > 3 is a red flag.
 #' @keywords internal
 durbin_watson <- function(res) {
   d <- diff(res)

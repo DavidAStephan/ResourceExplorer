@@ -4,18 +4,17 @@
 \alias{load_config}
 \title{Load project configuration}
 \usage{
-load_config(path = "config.yml", profile = "default")
+load_config(path = "config.R")
 }
 \arguments{
-\item{path}{Path to \code{config.yml}. Defaults to the project root.}
-
-\item{profile}{Config profile. Defaults to \code{"default"}.}
+\item{path}{Path to the R config file. Defaults to \code{config.R} in the
+working directory.}
 }
 \value{
 A named list of configuration values.
 }
 \description{
-Reads \code{config.yml} from the project root using the \code{{config}} package.
-All downstream targets should pull paths and parameters from the
-returned list rather than hard-coding.
+Reads an R-file config (a script whose final expression is a list).
+The previous YAML-backed config was dropped when the package moved off
+the \code{config} / \code{yaml} dependencies (not on the work-laptop allow-list).
 }

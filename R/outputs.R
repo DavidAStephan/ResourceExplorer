@@ -1,15 +1,18 @@
-#' Write CSV exports to `outputs/`
+#' Write per-commodity CSV exports to `outputs/`
 #'
-#' Writes the four artefact CSVs named in the brief. In Phase 1 all
-#' inputs are empty, so this produces header-only CSVs -- confirming
-#' schemas flow through the DAG.
+#' Four artefacts, all keyed by commodity:
 #'
-#' @param nowcast_current One-row tibble from [run_nowcast()].
-#' @param portwatch Daily tonnage tibble.
+#' - `nowcast_current.csv` — one row per commodity: point + 80/95 bands
+#' - `tonnage_daily.csv`   — raw PortWatch daily panel (filtered to named commodities)
+#' - `tonnage_quarterly.csv` — aggregated quarterly tonnage per commodity
+#' - `bridge_diagnostics.csv` — one row per commodity: R², DW, β_T, RMSEs
+#'
+#' @param nowcast_current Tibble from [run_nowcast()] (one row per commodity).
+#' @param portwatch Daily tonnage tibble from [fetch_portwatch_tonnage()].
 #' @param bridge_fits Output of [fit_bridge()].
 #' @param backtest_results Tibble from [backtest_rmse()].
 #' @param cfg Config list.
-#' @return Invisibly, a character vector of file paths written.
+#' @return Invisibly, a named character vector of file paths written.
 #' @export
 write_csv_outputs <- function(nowcast_current, portwatch, bridge_fits,
                               backtest_results, cfg) {
@@ -17,40 +20,61 @@ write_csv_outputs <- function(nowcast_current, portwatch, bridge_fits,
   fs::dir_create(out)
 
   paths <- c(
-    nowcast_current     = fs::path(out, "nowcast_current.csv"),
-    tonnage_daily       = fs::path(out, "tonnage_daily.csv"),
-    tonnage_monthly     = fs::path(out, "tonnage_monthly.csv"),
-    bridge_diagnostics  = fs::path(out, "bridge_diagnostics.csv")
+    nowcast_current    = fs::path(out, "nowcast_current.csv"),
+    tonnage_daily      = fs::path(out, "tonnage_daily.csv"),
+    tonnage_quarterly  = fs::path(out, "tonnage_quarterly.csv"),
+    bridge_diagnostics = fs::path(out, "bridge_diagnostics.csv")
   )
 
   readr::write_csv(nowcast_current, paths[["nowcast_current"]])
-  readr::write_csv(portwatch,       paths[["tonnage_daily"]])
 
-  tonnage_monthly <- portwatch |>
+  pw_named <- dplyr::filter(portwatch,
+                            .data$commodity %in% cfg$commodities)
+  readr::write_csv(pw_named, paths[["tonnage_daily"]])
+
+  tonnage_quarterly <- pw_named |>
     dplyr::mutate(
-      month_end = lubridate::ceiling_date(.data$obs_date, "month") - 1
+      quarter_end = lubridate::ceiling_date(.data$obs_date, "quarter") - 1
     ) |>
-    dplyr::group_by(.data$month_end, .data$commodity) |>
+    dplyr::group_by(.data$quarter_end, .data$commodity) |>
     dplyr::summarise(tonnage = sum(.data$tonnage, na.rm = TRUE),
                      .groups = "drop")
-  readr::write_csv(tonnage_monthly, paths[["tonnage_monthly"]])
+  readr::write_csv(tonnage_quarterly, paths[["tonnage_quarterly"]])
 
-  # Pull per-commodity diagnostics from fits, augment with validation RMSE.
   fit_diag <- purrr::map_dfr(bridge_fits, function(f) f$diagnostics)
+  # Normalise empty fit_diag so the downstream join works.
+  if (!"commodity" %in% names(fit_diag)) {
+    fit_diag <- tibble::tibble(
+      commodity       = character(),
+      n_obs           = integer(),
+      r_squared       = double(),
+      rmse_train      = double(),
+      dw_stat         = double(),
+      beta_tonnage    = double(),
+      beta_tonnage_se = double()
+    )
+  }
+
   valid_rmse <- if (nrow(backtest_results) > 0) {
     backtest_results |>
+      dplyr::group_by(.data$commodity) |>
       dplyr::summarise(
         rmse_valid = sqrt(mean(.data$err^2,       na.rm = TRUE)),
-        rmse_naive = sqrt(mean(.data$err_naive^2, na.rm = TRUE))
+        rmse_naive = sqrt(mean(.data$err_naive^2, na.rm = TRUE)),
+        .groups    = "drop"
       )
   } else {
-    tibble::tibble(rmse_valid = NA_real_, rmse_naive = NA_real_)
+    tibble::tibble(
+      commodity  = character(),
+      rmse_valid = double(),
+      rmse_naive = double()
+    )
   }
+
   diagnostics <- fit_diag |>
+    dplyr::left_join(valid_rmse, by = "commodity") |>
     dplyr::mutate(
-      rmse_valid      = valid_rmse$rmse_valid,
-      rmse_naive      = valid_rmse$rmse_naive,
-      ratio_vs_naive  = .data$rmse_valid / .data$rmse_naive
+      ratio_vs_naive = .data$rmse_valid / .data$rmse_naive
     )
   readr::write_csv(diagnostics, paths[["bridge_diagnostics"]])
 
@@ -60,10 +84,7 @@ write_csv_outputs <- function(nowcast_current, portwatch, bridge_fits,
 
 #' Render the briefing to HTML via rmarkdown
 #'
-#' Calls `rmarkdown::render()` with explicit params so the briefing reads
-#' from the configured `outputs/` and warehouse directories. HTML only;
-#' the previous quarto-rendered PDF path was dropped because `{quarto}`
-#' and the quarto CLI are not on the work-laptop allow-list.
+#' Calls `rmarkdown::render()` with explicit params.
 #'
 #' @param rmd_path Path to the `briefing.Rmd` source.
 #' @param nowcast_current Dependency object (triggers rebuild).

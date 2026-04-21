@@ -2,12 +2,13 @@
 % Please edit documentation in R/bridge.R
 \name{durbin_watson}
 \alias{durbin_watson}
-\title{Durbin-Watson stat for a residual vector (no regression required).}
+\title{Durbin-Watson stat for a residual vector (no regression required).
+Values near 2 suggest no first-order autocorrelation; < 1 or > 3 is a red flag.}
 \usage{
 durbin_watson(res)
 }
 \description{
-Avoids dragging in \code{{lmtest}} just for this. Values near 2 suggest
-no first-order autocorrelation; < 1 or > 3 is a red flag.
+Durbin-Watson stat for a residual vector (no regression required).
+Values near 2 suggest no first-order autocorrelation; < 1 or > 3 is a red flag.
 }
 \keyword{internal}

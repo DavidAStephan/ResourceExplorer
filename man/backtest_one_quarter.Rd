@@ -2,11 +2,11 @@
 % Please edit documentation in R/backtest.R
 \name{backtest_one_quarter}
 \alias{backtest_one_quarter}
-\title{Backtest a single quarter -- isolated for unit testing}
+\title{Backtest a single quarter across all commodities -- exposed for testing}
 \usage{
-backtest_one_quarter(q, features, actuals, deflators, cfg)
+backtest_one_quarter(q, features, commodities, cfg)
 }
 \description{
-Backtest a single quarter -- isolated for unit testing
+Backtest a single quarter across all commodities -- exposed for testing
 }
 \keyword{internal}

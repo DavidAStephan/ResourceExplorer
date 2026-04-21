@@ -2,12 +2,14 @@
 % Please edit documentation in R/state.R
 \name{last_nowcast_run}
 \alias{last_nowcast_run}
-\title{Fetch the previous run's nowcast for the same quarter, if any}
+\title{Fetch the previous run's nowcast for a specific commodity + quarter}
 \usage{
-last_nowcast_run(cfg, current_quarter, exclude_run_timestamp = NULL)
+last_nowcast_run(cfg, commodity, current_quarter, exclude_run_timestamp = NULL)
 }
 \arguments{
 \item{cfg}{Config list.}
+
+\item{commodity}{Commodity name (e.g. "iron_ore").}
 
 \item{current_quarter}{Quarter-end date.}
 
@@ -17,5 +19,5 @@ last_nowcast_run(cfg, current_quarter, exclude_run_timestamp = NULL)
 One-row tibble or NULL if no prior run exists.
 }
 \description{
-Fetch the previous run's nowcast for the same quarter, if any
+Fetch the previous run's nowcast for a specific commodity + quarter
 }

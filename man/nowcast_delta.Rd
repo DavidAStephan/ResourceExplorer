@@ -2,12 +2,12 @@
 % Please edit documentation in R/state.R
 \name{nowcast_delta}
 \alias{nowcast_delta}
-\title{Compute delta between current and previous nowcast}
+\title{Compute delta between current and previous nowcast for one commodity}
 \usage{
 nowcast_delta(current, previous)
 }
 \arguments{
-\item{current}{One-row tibble from \code{\link[=run_nowcast]{run_nowcast()}}.}
+\item{current}{One-row tibble filtered from \code{\link[=run_nowcast]{run_nowcast()}}.}
 
 \item{previous}{One-row tibble from \code{\link[=last_nowcast_run]{last_nowcast_run()}}.}
 }
@@ -15,5 +15,5 @@ nowcast_delta(current, previous)
 Tibble of deltas, or \code{NULL} if \code{previous} is \code{NULL}.
 }
 \description{
-Compute delta between current and previous nowcast
+Compute delta between current and previous nowcast for one commodity
 }

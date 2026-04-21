@@ -2,23 +2,15 @@
 % Please edit documentation in R/nowcast.R
 \name{build_nowcast_pred_frame}
 \alias{build_nowcast_pred_frame}
-\title{Assemble a prediction frame for the current quarter}
+\title{Build the one-row-per-commodity prediction frame for the current quarter}
 \usage{
-build_nowcast_pred_frame(
-  features,
-  portwatch,
-  ports_meta,
-  fred,
-  cfg,
-  as_of,
-  fits
-)
+build_nowcast_pred_frame(features, portwatch, cfg, as_of, fits)
 }
 \description{
-For each commodity with a fit, we need three monthly rows in \code{Q}:
-\code{log_tonnage_sa} from the extrapolated tonnage, \code{log_price} from the
-latest FRED observation (carried forward), and \code{log_y_lag1} from the
-most recent observed \code{log_y}. Subsequent months' lags are filled by
-\code{predict_bridge()} recursively.
+Computes quarterly tonnage via \code{\link[=extrapolate_quarter_tonnage]{extrapolate_quarter_tonnage()}} (which
+sums observed days + partial-month scale-up + future-month seasonal
+extrapolation), then carries forward the commodity's latest seasonal
+factor from the feature history to get \code{log_tonnage_sa}. Seeds
+\code{log_volume_lag1} from the commodity's most recent observed \code{log_volume}.
 }
 \keyword{internal}
