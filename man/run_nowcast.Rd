@@ -31,7 +31,7 @@ commodity-labelled).}
 }
 \value{
 Tibble with one row per commodity: \code{commodity}, \code{quarter_end},
-\code{point_estimate_chainvol_aud_m}, \code{lower_80}, \code{upper_80}, \code{lower_95},
+\code{point_estimate_Mt}, \code{lower_80}, \code{upper_80}, \code{lower_95},
 \code{upper_95}, \code{share_observed}, \code{run_timestamp}.
 }
 \description{

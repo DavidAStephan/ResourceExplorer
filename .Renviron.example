@@ -1,12 +1,12 @@
 # Copy to .Renviron (gitignored) and fill in values.
 # Reload with readRenviron(".Renviron") or by restarting R.
+#
+# resourcetracker currently requires no API keys. PortWatch and DISR
+# are both public endpoints. This file is kept as a placeholder so that
+# any future env-driven overrides have a documented spot.
 
-# FRED — required. Register at https://fred.stlouisfed.org/docs/api/api_key.html
-FRED_API_KEY=
-
-# IMF PortWatch — not currently required (public ArcGIS FeatureServer).
-# Set only if we discover a gated endpoint in Phase 2.
-# PORTWATCH_API_KEY=
-
-# Optional: override the log level for logger (TRACE/DEBUG/INFO/WARN/ERROR)
+# Optional: override the log level (TRACE/DEBUG/INFO/WARN/ERROR)
 # RESOURCETRACKER_LOG_LEVEL=INFO
+
+# Optional: pin the PortWatch FeatureServer URL (e.g. for testing).
+# PORTWATCH_BASE_URL=https://.../FeatureServer/0

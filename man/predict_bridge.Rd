@@ -2,24 +2,21 @@
 % Please edit documentation in R/bridge.R
 \name{predict_bridge}
 \alias{predict_bridge}
-\title{Predict from fitted bridge models, recursively for multi-step ahead.}
+\title{Predict from fitted bridge models}
 \usage{
 predict_bridge(fits, newdata)
 }
 \arguments{
 \item{fits}{Output of \code{\link[=fit_bridge]{fit_bridge()}}.}
 
-\item{newdata}{Long feature tibble for the horizon to predict.
-Rows per commodity must be sorted by \code{quarter_end} ascending. The
-first row's \code{log_volume_lag1} must be populated (seeded from the
-last observed \code{log_volume} in training).}
+\item{newdata}{Long feature tibble for the horizon to predict.}
 }
 \value{
-Tibble: \code{quarter_end}, \code{commodity}, \code{yhat_log},
-\code{yhat_volume_aud_m}.
+Tibble: \code{quarter_end}, \code{commodity}, \code{yhat_log}, \code{yhat_volume_Mt}.
 }
 \description{
-Because \code{log_volume_lag1} is on the RHS, a 2-quarter-ahead forecast
-uses the 1-quarter-ahead prediction as its lag input. We iterate
-quarter-by-quarter, overwriting \code{log_volume_lag1} at each step.
+With a year-ago lag (\code{log_volume_lag4}), multi-step forecasts do NOT
+need recursion: quarter Q's lag is Q-4's OBSERVED volume, which is
+always known once it's landed. \code{newdata} must carry
+\code{yoy_log_tonnage_sa} and \code{log_volume_lag4} columns.
 }

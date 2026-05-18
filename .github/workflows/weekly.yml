@@ -1,0 +1,237 @@
+## Weekly nowcast pipeline.
+##
+## Schedule: Tue 09:00 AEST (UTC+10). Drifts to 10:00 local during AEDT
+## (UTC+11) -- acceptable for a weekly cadence, fix if it ever matters.
+##
+## State (warehouse + cache + report archive) persists on the `data`
+## branch, which this job force-pushes at the end of each successful run.
+## The current week's briefing is also deployed to GitHub Pages.
+
+name: weekly-nowcast
+
+"on":
+  schedule:
+    - cron: "0 23 * * 1"     # Tuesday 23:00 UTC = 09:00 AEST
+  workflow_dispatch:
+
+# One run at a time. Don't cancel the in-flight one if a manual dispatch
+# arrives mid-cron -- we'd rather it finish + write state than abort.
+concurrency:
+  group: weekly-nowcast
+  cancel-in-progress: false
+
+permissions:
+  contents: write     # push to the `data` branch
+  pages: write        # deploy the briefing to Pages
+  id-token: write     # required by actions/deploy-pages@v4
+  issues: write       # open/close the failure-notification issue
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # Surface the deployed Pages URL on the run summary.
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.4"
+          use-public-rspm: true   # Posit Package Manager binaries
+
+      - name: Install R package dependencies (cached binaries)
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            local::.
+            any::devtools
+          needs: check
+
+      - name: Restore pipeline state from `data` branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Clone the data branch into a side directory. If it doesn't exist
+          # yet (first run after delete), create an empty layout so the rest
+          # of the workflow can write to it.
+          AUTH_URL="https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          if git ls-remote --exit-code --heads "$AUTH_URL" data > /dev/null; then
+            git clone --depth=1 --branch=data --single-branch "$AUTH_URL" ./_state
+          else
+            echo "::warning::data branch missing on remote -- creating empty state"
+            mkdir -p ./_state
+            (cd ./_state && git init -b data && git remote add origin "$AUTH_URL")
+          fi
+          mkdir -p data/warehouse data/cache
+          # Materialise any prior state into the workspace. The repo's
+          # main-branch .gitignore covers data/, so this never affects
+          # `git status` on main.
+          if [ -d ./_state/data ]; then
+            cp -R ./_state/data/. ./data/
+          fi
+          ls -la data/warehouse/ data/cache/ || true
+
+      - name: Run pipeline (--ci fails on all-stale ingest)
+        run: Rscript run.R --ci
+
+      - name: Build Pages site
+        id: site
+        run: |
+          set -euo pipefail
+          TODAY=$(date -u +%Y-%m-%d)
+          SITE=./_state/site
+          mkdir -p "$SITE/history" "$SITE/data"
+
+          # This week's briefing lives at /history/YYYY-MM-DD.html and
+          # is mirrored as /latest.html for a stable bookmark.
+          cp reports/briefing/briefing.html "$SITE/history/${TODAY}.html"
+          cp reports/briefing/briefing.html "$SITE/latest.html"
+
+          # CSV outputs alongside, for any reader who wants the raw series.
+          cp outputs/*.csv "$SITE/data/"
+
+          # Regenerate the index: reverse-chronological list of dated reports.
+          {
+            echo '<!doctype html><html><head>'
+            echo '<meta charset="utf-8">'
+            echo '<title>resourcetracker -- weekly nowcasts</title>'
+            echo '<style>body{font-family:system-ui,sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem;color:#222}h1{margin-bottom:0.2em}p.lede{color:#555;margin-top:0}ul{padding-left:1.2em;line-height:1.8}a{color:#0a58c2;text-decoration:none}a:hover{text-decoration:underline}.csv{font-size:0.9em;color:#666}</style>'
+            echo '</head><body>'
+            echo '<h1>resourcetracker</h1>'
+            echo '<p class="lede">Weekly nowcast of Australian iron-ore and coal physical-tonnage exports from IMF PortWatch AIS shipping data.</p>'
+            echo "<p><strong>Latest report (rendered ${TODAY}):</strong> <a href=\"latest.html\">latest.html</a></p>"
+            echo '<h2>History</h2><ul>'
+            ls -1 "$SITE/history/" | sort -r | while read -r f; do
+              dt="${f%.html}"
+              echo "<li><a href=\"history/${f}\">${dt}</a></li>"
+            done
+            echo '</ul>'
+            echo '<h2>CSV outputs (latest run)</h2><ul class="csv">'
+            for f in "$SITE/data/"*.csv; do
+              b=$(basename "$f")
+              echo "<li><a href=\"data/${b}\">${b}</a></li>"
+            done
+            echo '</ul>'
+            echo "<p class=\"csv\">Source code: <a href=\"https://github.com/${{ github.repository }}\">${{ github.repository }}</a> &middot; state branch: <a href=\"https://github.com/${{ github.repository }}/tree/data\">data</a></p>"
+            echo '</body></html>'
+          } > "$SITE/index.html"
+
+          echo "site_dir=$SITE" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ steps.site.outputs.site_dir }}
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
+
+      - name: Persist state back to `data` branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Mirror the workspace data dir back into _state/data
+          rm -rf ./_state/data
+          mkdir -p ./_state/data
+          cp -R ./data/. ./_state/data/
+
+          cd ./_state
+          git config user.name  "resourcetracker-bot"
+          git config user.email "resourcetracker-bot@users.noreply.github.com"
+          git add -A
+          # On a clean run with no upstream changes (already up-to-date data
+          # *and* unchanged site) git commit exits 1; treat as no-op.
+          if git diff --cached --quiet; then
+            echo "no state changes to commit"
+          else
+            git commit -m "state: weekly run $(date -u +%F)"
+            git push --force origin HEAD:data
+          fi
+
+      - name: Upload run logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nowcast-logs-${{ github.run_id }}
+          path: logs/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  notify-on-failure:
+    needs: run-pipeline
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open / update failure issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = "[weekly-nowcast] run failed";
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              `Weekly pipeline failed at ${new Date().toISOString()}.`,
+              ``,
+              `Failed run: ${runUrl}`,
+              ``,
+              `If this is a transient IMF PortWatch or DISR issue, re-run via`,
+              `the Actions tab (workflow_dispatch). If it persists, inspect`,
+              `the run log artifact and the most recent commit on the \`data\``,
+              `branch.`,
+              ``,
+              `This issue auto-closes on the next successful run.`,
+            ].join("\n");
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: "open", labels: "weekly-failure",
+            });
+            if (open.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: open.data[0].number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: ["weekly-failure"],
+              });
+            }
+
+  close-failure-issue:
+    needs: run-pipeline
+    if: success()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Close any open failure issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: "open", labels: "weekly-failure",
+            });
+            for (const issue of open.data) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `Resolved by successful run ${context.runId}. Auto-closing.`,
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: issue.number, state: "closed",
+              });
+            }

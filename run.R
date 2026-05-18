@@ -9,6 +9,7 @@
 ##   Rscript run.R              # normal run, skip steps whose rds is up-to-date
 ##   Rscript run.R --force      # force rerun of every step
 ##   Rscript run.R --no-report  # skip the briefing HTML render
+##   Rscript run.R --ci         # exit non-zero if every ingest landed on stale cache
 
 suppressPackageStartupMessages({
   library(dplyr)
@@ -31,6 +32,8 @@ warehouse_init_schema(cfg)
 args <- commandArgs(trailingOnly = TRUE)
 FORCE       <- "--force"     %in% args
 SKIP_REPORT <- "--no-report" %in% args
+CI_MODE     <- "--ci"        %in% args
+RUN_STARTED <- Sys.time()
 
 # --- skip-if-up-to-date helpers --------------------------------------------
 #
@@ -143,3 +146,34 @@ if (!SKIP_REPORT) {
 }
 
 log_info("pipeline complete -- %d csv outputs", length(csv_paths))
+
+# --- CI staleness guard ----------------------------------------------------
+#
+# In --ci mode, fail the run if every external fetch this pipeline
+# attempted landed on stale cache. The pipeline still produces outputs
+# (good for offline dev), but a weekly automated run that quietly serves
+# last week's data is a silent failure we want to surface loudly.
+
+if (CI_MODE) {
+  runs <- tryCatch(wh_read("mart_ingest_runs", cfg), error = function(e) NULL)
+  this_run <- if (!is.null(runs) && nrow(runs) > 0L) {
+    dplyr::filter(runs, .data$started_at >= RUN_STARTED)
+  } else {
+    NULL
+  }
+  # No rows: every ingest step was skipped via the rds-mtime cache. That
+  # only happens locally on a warm checkout -- a CI worker always starts
+  # cold, so we treat the empty case as clean.
+  if (is.null(this_run) || nrow(this_run) == 0L) {
+    log_info("ci: no ingest steps executed this run (all rds-cached)")
+  } else {
+    fresh <- sum(this_run$status == "ok")
+    stale <- sum(this_run$status %in% c("cached", "error"))
+    log_info("ci: ingest_runs this run -- %d fresh, %d stale/error",
+             fresh, stale)
+    if (fresh == 0L) {
+      log_warn("ci: every external fetch landed on stale cache -- exiting non-zero")
+      quit(status = 1L, save = "no")
+    }
+  }
+}

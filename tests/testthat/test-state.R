@@ -52,15 +52,15 @@ test_that("nowcast_delta computes per-field deltas", {
   prev <- tibble::tibble(
     commodity      = "iron_ore",
     quarter_end    = as.Date("2026-06-30"),
-    point_estimate = 47000,
-    lower_80 = 45000, upper_80 = 49000,
-    lower_95 = 43000, upper_95 = 51000,
+    point_estimate = 229,
+    lower_80 = 219, upper_80 = 239,
+    lower_95 = 209, upper_95 = 249,
     share_observed = 0.20,
     run_timestamp  = as.POSIXct("2026-04-19 10:00:00", tz = "UTC")
   )
   d <- nowcast_delta(cur, prev)
-  expect_equal(d$delta_point, 1000)
-  expect_equal(d$delta_upper_80, 1000)
+  expect_equal(d$delta_point, 1)
+  expect_equal(d$delta_upper_80, 1)
   expect_equal(d$hours_since, 1)
   expect_equal(d$commodity, "iron_ore")
 })

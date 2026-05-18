@@ -4,7 +4,7 @@
 \alias{derive_portwatch_commodity_rows}
 \title{Derive one row per (obs_date, port, commodity) from the wide schema.}
 \usage{
-derive_portwatch_commodity_rows(wide, ports_metadata)
+derive_portwatch_commodity_rows(wide, ports_metadata, lng_ports = character(0))
 }
 \arguments{
 \item{wide}{Tibble from \code{\link[=parse_portwatch_features]{parse_portwatch_features()}} (one row per
@@ -12,31 +12,34 @@ port-day, wide on vessel-type columns).}
 
 \item{ports_metadata}{Tibble with \code{port_name} and \code{commodity_class}
 columns. Other columns are ignored.}
+
+\item{lng_ports}{Character vector of \code{portname} strings that are
+genuine LNG export facilities. Tanker tonnage at these ports is
+routed to \code{lng}; tanker tonnage anywhere else is dropped.}
 }
 \value{
 Long tibble: \code{obs_date}, \code{port_id}, \code{commodity}, \code{tonnage},
 \code{vessel_count}, \code{ingested_at}.
 }
 \description{
-\strong{Commodity rules.} Australian resource exports map to vessel types
-cleanly enough that a single deterministic rule covers ~95\% of value:
+\strong{Commodity rules.}
 }
 \details{
 \itemize{
-\item \code{export_tanker} at \strong{any} port -> \code{lng}. LNG dominates Australian
-tanker exports; refined-petroleum and other tanker cargoes are
-small and their drift ends up absorbed by the "other" residual at
-the ABS 5368 join.
-\item \code{export_dry_bulk} at an \strong{iron-ore-class} port -> \code{iron_ore}.
-\item \code{export_dry_bulk} at a \strong{coal-class} port -> \code{coal}.
-\item \code{export_dry_bulk} at any other port -> \code{other} (bauxite, grain,
-sugar, etc.).
-\item All container / general-cargo / roro exports -> \code{other}.
+\item \code{export_tanker} \strong{at a port in \code{lng_ports}} -> \code{lng}. Other tanker
+tonnage (refined petroleum, bunkers, LPG) is dropped; a port-level
+investigation on 2026-04-21 showed non-LNG tanker activity was
+contaminating and dragging the aggregate — the real LNG ports
+(Dampier, Gladstone, Darwin, Gorgon LNG, Onslow) are stable to
+growing. The whitelist comes from \code{cfg$portwatch$lng_ports}.
+\item \code{export_dry_bulk} at an iron-ore-class port -> \code{iron_ore}.
+\item \code{export_dry_bulk} at a coal-class port -> \code{coal}.
+\item All other vessel types and all other tanker -> dropped (no "other"
+bucket in the current per-commodity-volume spec).
 }
 
-The classification of a port as iron_ore / coal / lng / other comes
-from \code{inst/extdata/ports_metadata.csv} via a join on \code{portname}. Ports
-absent from the metadata are treated as \code{commodity_class = "other"}.
+Port commodity classes come from \code{inst/extdata/ports_metadata.csv}
+via a join on \code{portname}.
 
 Zero-tonnage rows are dropped.
 }

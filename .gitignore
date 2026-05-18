@@ -23,6 +23,10 @@ data/warehouse.duckdb.wal
 outputs/
 logs/
 
+# Side worktrees / clones the weekly workflow uses for state persistence
+_state/
+_site/
+
 # OS
 .DS_Store
 Thumbs.db
