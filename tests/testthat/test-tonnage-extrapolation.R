@@ -75,3 +75,71 @@ test_that("empty portwatch produces NA tonnage with status=estimated", {
                                      as_of = as.Date("2023-05-10"))
   expect_true(all(is.na(out$tonnage_est)))
 })
+
+test_that("partial-month scale-up anchors on data, not the calendar (PortWatch lag fix)", {
+  # The bug: when as_of advances past max(obs_date), the old code divided
+  # actually-observed tonnage by an expected-share computed for days the
+  # data never reached. Two identical fixtures, one called with
+  # as_of=last_data_day and one called 14 days later -- the partial-month
+  # tonnage_est should be within a few percent of each other, not 2-3x
+  # apart.
+  pw <- fixture_portwatch() |>
+    dplyr::filter(obs_date <= as.Date("2023-05-08"))
+  pm <- fixture_ports()
+  cfg <- list(commodities = "iron_ore",
+              sample = list(train_end = "2023-12-31"))
+
+  no_lag  <- extrapolate_quarter_tonnage(pw, pm, cfg,
+                                         as_of = as.Date("2023-05-08")) |>
+    dplyr::filter(status == "partial")
+  laggy   <- extrapolate_quarter_tonnage(pw, pm, cfg,
+                                         as_of = as.Date("2023-05-22")) |>
+    dplyr::filter(status == "partial")
+
+  expect_equal(nrow(no_lag), 1)
+  expect_equal(nrow(laggy),  1)
+  # Same effective data, same scaled estimate (within 1%) regardless of
+  # how stale Sys.Date() pretends to be.
+  expect_equal(laggy$tonnage_est, no_lag$tonnage_est, tolerance = 0.01)
+})
+
+test_that("zero data for the current month falls through to the seasonal estimate, never zero", {
+  # The worst case of the original bug: PortWatch data ends on the last
+  # day of the prior quarter; we're now 5 days into the new one. The
+  # old code would assign tonnage_est = 0 (obs=0 divided by ~5% floor).
+  # Post-fix: month_floor > effective_today, so the future-month branch
+  # fires and we get seasonal_norm * pace.
+  pw <- fixture_portwatch() |>
+    dplyr::filter(obs_date <= as.Date("2023-03-31"))
+  pm <- fixture_ports()
+  cfg <- list(commodities = "iron_ore",
+              sample = list(train_end = "2023-12-31"))
+
+  out <- extrapolate_quarter_tonnage(pw, pm, cfg,
+                                     as_of = as.Date("2023-04-05"))
+
+  expect_equal(nrow(out), 3)
+  # None of the three Q2 months should land at literally zero (or near it).
+  expect_true(all(out$tonnage_est > 1e4))
+  # All three should be "estimated" -- effective_today is March 31, before
+  # any Q2 month started.
+  expect_true(all(out$status == "estimated"))
+})
+
+test_that("sanity_clip_partial clips estimates more than 3x off the seasonal anchor", {
+  # 4x above
+  expect_equal(sanity_clip_partial(400, 100, "iron_ore", as.Date("2024-05-31")),
+               100)
+  # 4x below
+  expect_equal(sanity_clip_partial(25, 100, "iron_ore", as.Date("2024-05-31")),
+               100)
+  # Within 3x -- passes through untouched
+  expect_equal(sanity_clip_partial(250, 100, "iron_ore", as.Date("2024-05-31")),
+               250)
+  expect_equal(sanity_clip_partial(40, 100, "iron_ore", as.Date("2024-05-31")),
+               40)
+  # No anchor available -- pass through.
+  expect_equal(sanity_clip_partial(400, NA_real_, "iron_ore",
+                                   as.Date("2024-05-31")),
+               400)
+})
