@@ -2,14 +2,16 @@
 % Please edit documentation in R/features.R
 \name{build_features}
 \alias{build_features}
-\title{Build the quarterly feature panel for per-commodity volume bridges}
+\title{Build the MIDAS-style quarterly feature panel}
 \usage{
-build_features(portwatch, abs_5302, cfg)
+build_features(portwatch, disr_req, cfg)
 }
 \arguments{
 \item{portwatch}{Daily tonnage tibble from \code{\link[=fetch_portwatch_tonnage]{fetch_portwatch_tonnage()}}.}
 
-\item{abs_5302}{Quarterly chain-volume tibble from \code{\link[=fetch_abs_5302]{fetch_abs_5302()}}.}
+\item{disr_req}{Quarterly physical-volume tibble from
+\code{\link[=fetch_disr_req]{fetch_disr_req()}} with columns \code{quarter_end}, \code{commodity},
+\code{tonnes_Mt}.}
 
 \item{cfg}{Config list.}
 }
@@ -17,27 +19,29 @@ build_features(portwatch, abs_5302, cfg)
 Tibble keyed by \verb{(commodity, quarter_end)}.
 }
 \description{
-One row per (\code{commodity}, \code{quarter_end}) with everything a quarterly
-bridge needs:
+One row per (\code{commodity}, \code{quarter_end}). The "MIDAS" (mixed-data
+sampling) part: each quarter is broken into three monthly positions
+(\code{m1}, \code{m2}, \code{m3}) so the bridge can weight within-quarter timing
+differently for each — useful because PortWatch tonnage for, say,
+the first month of a quarter is mechanically a better indicator of
+that quarter's exports than the third (which is still being filled
+in at nowcast time).
 }
 \details{
-\tabular{ll}{
+Columns:\tabular{ll}{
    column \tab meaning \cr
-   \code{commodity} \tab one of \code{iron_ore}, \code{coal}, \code{lng} \cr
+   \code{commodity} \tab one of \code{iron_ore}, \code{coal} \cr
    \code{quarter_end} \tab last day of the quarter \cr
-   \code{volume_chainvol_aud_m} \tab LHS target from ABS 5302 T25 (chain-volume A$m) \cr
-   \code{tonnage} \tab RHS: quarterly PortWatch tonnage sum (tonnes) \cr
-   \code{tonnage_sa} \tab STL seasonally-adjusted quarterly tonnage \cr
+   \code{volume_Mt} \tab LHS target: DISR REQ T16 physical Mt \cr
+   \code{tonnage} \tab total quarterly PortWatch tonnage (sum m1+m2+m3) \cr
+   \code{tonnage_m1} .. \verb{_m3} \tab PortWatch tonnage in each month of the quarter \cr
    \code{log_volume} \tab log of LHS \cr
-   \code{log_tonnage} \tab log of raw tonnage \cr
-   \code{log_tonnage_sa} \tab log of SA tonnage (RHS used in bridge) \cr
-   \code{log_volume_lag1} \tab AR(1) lag of \code{log_volume} per commodity \cr
+   \code{log_tonnage_m1} .. \verb{_m3} \tab logs of monthly positions \cr
+   \code{log_volume_lag4} \tab year-ago LHS (seasonal anchor) \cr
+   \code{yoy_log_tonnage_m1} .. \verb{_m3} \tab YoY Δ of each monthly position (RHS in bridge) \cr
 }
 
 
-This is a deliberate simplification of the earlier monthly /
-price-denominated feature matrix: no FRED prices, no ABS 5368 value,
-no residual "other" bucket. See
-\verb{~/.claude/projects/-Users-davidstephan-Documents-ResourceTracker/memory/project_target_series.md}
-for the brief that drove the pivot.
+YoY differencing on each monthly position strips out seasonality
+mechanically, so no STL / X-13 is applied here.
 }

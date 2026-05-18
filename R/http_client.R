@@ -20,7 +20,18 @@ make_request <- function(url,
       max_tries = max_attempts,
       backoff   = function(i) backoff_seconds * (2 ^ (i - 1)),
       is_transient = function(resp) {
-        httr2::resp_status(resp) %in% c(408, 425, 429, 500, 502, 503, 504)
+        if (httr2::resp_status(resp) %in% c(408, 425, 429, 500, 502, 503, 504)) {
+          return(TRUE)
+        }
+        # ArcGIS occasionally returns HTTP 200 with `{"error":{...}}`
+        # under load. Treat that body as transient so the retry loop
+        # gets a second chance instead of falling through with 0 rows.
+        ct <- httr2::resp_content_type(resp) %||% ""
+        if (grepl("json", ct, ignore.case = TRUE)) {
+          body <- tryCatch(httr2::resp_body_string(resp), error = function(e) "")
+          if (grepl("^\\s*\\{\\s*\"error\"\\s*:", body)) return(TRUE)
+        }
+        FALSE
       }
     )
 }

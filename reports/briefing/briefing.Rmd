@@ -39,6 +39,84 @@ history  <- safe_read_wh("mart_nowcast_history")
 disr     <- safe_read_wh("raw_disr_req_quarterly")
 
 com_levels <- c("iron_ore", "coal")
+
+# For each commodity in `nowcast`, find the most-recent prior row in
+# `history` for the same quarter that isn't this run, and compute the
+# point + 80% band delta. Returns a tibble with one row per commodity;
+# delta cols are NA when no prior exists.
+compute_wow_delta <- function(nowcast, history) {
+  if (nrow(nowcast) == 0 || nrow(history) == 0) {
+    return(tibble::tibble(commodity = character(),
+                          delta_point = double(),
+                          delta_pct = double(),
+                          prior_run = as.POSIXct(NA),
+                          hours_since = double()))
+  }
+  history <- history |>
+    mutate(run_timestamp = as.POSIXct(run_timestamp),
+           quarter_end   = as.Date(quarter_end))
+  purrr::map_dfr(seq_len(nrow(nowcast)), function(i) {
+    cur <- nowcast[i, ]
+    cur_ts <- as.POSIXct(cur$run_timestamp)
+    prior <- history |>
+      filter(commodity == cur$commodity,
+             quarter_end == as.Date(cur$quarter_end),
+             run_timestamp < cur_ts) |>
+      arrange(desc(run_timestamp)) |>
+      slice(1)
+    if (nrow(prior) == 0) {
+      tibble::tibble(commodity   = cur$commodity,
+                     delta_point = NA_real_,
+                     delta_pct   = NA_real_,
+                     prior_run   = as.POSIXct(NA),
+                     hours_since = NA_real_)
+    } else {
+      d <- cur$point_estimate_Mt - prior$point_estimate
+      tibble::tibble(
+        commodity   = cur$commodity,
+        delta_point = d,
+        delta_pct   = 100 * d / prior$point_estimate,
+        prior_run   = prior$run_timestamp,
+        hours_since = as.numeric(difftime(cur_ts, prior$run_timestamp,
+                                          units = "hours"))
+      )
+    }
+  })
+}
+
+delta <- compute_wow_delta(nowcast, history)
+```
+
+## Top line
+
+```{r top-line, results='asis'}
+if (nrow(nowcast) == 0) {
+  cat("*No nowcast available this run.*\n")
+} else {
+  nc <- nowcast |>
+    mutate(commodity = factor(commodity, levels = com_levels)) |>
+    arrange(commodity) |>
+    left_join(delta, by = "commodity")
+  for (i in seq_len(nrow(nc))) {
+    r <- nc[i, ]
+    change <- if (is.na(r$delta_point)) {
+      "first nowcast for this quarter"
+    } else {
+      sign_lbl <- if (r$delta_point >= 0) "+" else ""
+      sprintf("%s%.1f Mt (%s%.1f%%) vs the run %.0fh ago",
+              sign_lbl, r$delta_point, sign_lbl, r$delta_pct, r$hours_since)
+    }
+    cat(sprintf(
+      "- **%s** %s: **%.1f Mt** (80%% CI %.1f – %.1f). Quarter %.0f%% observed. Change: %s.\n",
+      toupper(as.character(r$commodity)),
+      format(as.Date(r$quarter_end), "%b %Y"),
+      r$point_estimate_Mt,
+      r$lower_80, r$upper_80,
+      100 * r$share_observed,
+      change
+    ))
+  }
+}
 ```
 
 ## Headline: current-quarter nowcasts (Mt)
@@ -148,35 +226,30 @@ if (nrow(tonnage) > 0) {
 
 ## Change since last run
 
-```{r delta}
-if (nrow(history) >= 2) {
-  by_com <- history |>
-    mutate(run_timestamp = as.POSIXct(run_timestamp)) |>
-    arrange(commodity, run_timestamp) |>
-    group_by(commodity) |>
-    summarise(
-      prior_point = dplyr::nth(point_estimate, -2L),
-      now_point   = dplyr::last(point_estimate),
-      delta       = now_point - prior_point,
-      hours_since = as.numeric(difftime(
-                      dplyr::last(run_timestamp),
-                      dplyr::nth(run_timestamp, -2L),
-                      units = "hours")),
-      .groups = "drop"
-    ) |>
-    filter(!is.na(prior_point))
-  if (nrow(by_com) > 0) {
-    by_com |>
-      mutate(prior_point = round(prior_point, 2),
-             now_point   = round(now_point, 2),
-             delta       = round(delta, 2),
-             hours_since = round(hours_since, 1)) |>
-      knitr::kable()
-  } else {
-    cat("*First run for every commodity -- no prior to compare against.*")
-  }
+```{r delta, results='asis'}
+# Reuse the `delta` tibble from the Top line; join back to nowcast to
+# pull the now-point so this section stands alone.
+if (nrow(nowcast) == 0 || nrow(delta) == 0) {
+  cat("*No nowcast available this run.*\n")
+} else if (all(is.na(delta$delta_point))) {
+  cat("*First run for every commodity (this quarter) -- no prior to compare against.*\n")
 } else {
-  cat("*First run -- no prior nowcast in history.*")
+  nowcast |>
+    select(commodity, quarter_end, now_Mt = point_estimate_Mt) |>
+    left_join(delta, by = "commodity") |>
+    filter(!is.na(delta_point)) |>
+    mutate(
+      commodity   = factor(commodity, levels = com_levels),
+      prior_Mt    = round(now_Mt - delta_point, 2),
+      now_Mt      = round(now_Mt, 2),
+      delta_Mt    = round(delta_point, 2),
+      delta_pct   = round(delta_pct, 2),
+      hours_since = round(hours_since, 1)
+    ) |>
+    arrange(commodity) |>
+    select(commodity, quarter_end, prior_Mt, now_Mt, delta_Mt, delta_pct,
+           hours_since) |>
+    knitr::kable(caption = "Same-quarter run-over-run delta. Drops rows for any commodity whose current quarter has no prior nowcast.")
 }
 ```
 

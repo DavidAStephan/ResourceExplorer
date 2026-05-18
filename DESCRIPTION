@@ -18,6 +18,7 @@ Imports:
     curl,
     dplyr,
     fs,
+    ggplot2,
     httr2,
     jsonlite,
     lubridate,
@@ -30,7 +31,6 @@ Imports:
     tibble,
     tidyr
 Suggests:
-    ggplot2,
     knitr,
     lintr,
     shiny,

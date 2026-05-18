@@ -2,7 +2,7 @@
 % Please edit documentation in R/bridge.R
 \name{fit_bridge}
 \alias{fit_bridge}
-\title{Fit per-commodity quarterly volume bridge regressions}
+\title{Fit per-commodity bridge regressions (per-commodity spec)}
 \usage{
 fit_bridge(features, cfg)
 }
@@ -23,16 +23,30 @@ dw_stat, beta_tonnage, beta_tonnage_se)
 }
 }
 \description{
-\strong{Specification.} For each commodity \code{c} we fit, on quarterly data,
+\strong{Two specifications, both with a year-ago LHS lag as the seasonal
+anchor.} Choice per commodity via \code{cfg$bridge$spec} (default:
+\code{"aggregate"} if unspecified).
 }
 \details{
-\deqn{\log V_{c,Q} = \beta_0 + \beta_1 \log T^{SA}_{c,Q} + \beta_2 \log V_{c,Q-1} + \varepsilon_{c,Q}}
+\itemize{
+\item \strong{aggregate} (parsimonious, 3 params + intercept):
+\deqn{\log V_{c,Q} = \beta_0 + \beta_T \, \Delta_{Q,Q-4}\log T_{c,Q} + \beta_4 \log V_{c,Q-4} + \varepsilon_{c,Q}}
+\item \strong{midas} (flexible, 5 params + intercept):
+\deqn{\log V_{c,Q} = \beta_0 + \sum_{m=1}^{3} \beta_m \, \Delta_{Q,Q-4}\log T_{c,Q,m} + \beta_4 \log V_{c,Q-4} + \varepsilon_{c,Q}}
+}
 
-where \code{V} is the ABS 5302 Table 25 chain-volume series for commodity
-\code{c} (LHS target) and \code{T^{SA}} is STL-seasonally-adjusted quarterly
-PortWatch tonnage. The AR(1) lag absorbs most residual persistence;
-Newey-West HAC standard errors with \code{lag = cfg$bridge$hac_lag} (1 at
-quarterly frequency, by default) handle what remains.
+Why per-commodity: MIDAS wins when within-quarter monthly betas
+legitimately differ (iron_ore: β_m1 dominates — early-quarter
+shipping is a leading indicator). Aggregate wins when the monthly
+betas would be roughly equal (coal: all three near-equal, so the
+extra params just inflate variance). 2026-04-21 backtest showed
+iron_ore improves 5\% under MIDAS and coal degrades 16\%; split spec
+is best-of-both.
+
+\code{V} is DISR REQ Table 16 physical quarterly tonnage (Mt); YoY
+differencing on the RHS mechanically strips seasonality so no
+X-13 / STL is applied. Newey-West HAC standard errors with
+\code{lag = cfg$bridge$hac_lag}.
 
 \strong{Why no log price.} The target is already a \emph{volume} measure
 (chain-volume, reference year 2022-23). Price effects are stripped
