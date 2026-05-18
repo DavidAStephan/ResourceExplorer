@@ -6,6 +6,7 @@ Resources & Energy Quarterly (REQ) Table 16 as the truth series.
 Per-commodity bridge regressions feed a current-quarter point estimate
 with bootstrap 80% and 95% bands that shrink as the quarter is observed.
 
+- **Latest weekly nowcast:** <https://davidastephan.github.io/ResourceExplorer/>
 - Methodology: [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md)
 - Brief: [`PROJECT_BRIEF.txt`](PROJECT_BRIEF.txt)
 
@@ -80,6 +81,9 @@ testthat::test_dir("tests/testthat")
 The pipeline runs every **Tuesday at 09:00 AEST** via
 [`.github/workflows/weekly.yml`](.github/workflows/weekly.yml). It can
 also be triggered manually from the Actions tab (`workflow_dispatch`).
+Each run publishes to <https://davidastephan.github.io/ResourceExplorer/>
+(bookmark `latest.html` for the current week; `history/YYYY-MM-DD.html`
+for any previous week).
 
 | Concern | Where it lives |
 |---|---|
