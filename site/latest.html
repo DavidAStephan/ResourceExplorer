@@ -385,7 +385,12 @@ nowcasts (Mt)</a></li>
 diagnostics</a></li>
 <li><a href="#portwatch-tonnage-trend" id="toc-portwatch-tonnage-trend">PortWatch tonnage trend</a></li>
 <li><a href="#change-since-last-run" id="toc-change-since-last-run">Change since last run</a></li>
-<li><a href="#methodology-footnote" id="toc-methodology-footnote">Methodology footnote</a></li>
+<li><a href="#methodology" id="toc-methodology">Methodology</a>
+<ul>
+<li><a href="#production-equation-per-commodity" id="toc-production-equation-per-commodity">Production equation per
+commodity</a></li>
+<li><a href="#conventions" id="toc-conventions">Conventions</a></li>
+</ul></li>
 </ul>
 </div>
 
@@ -393,11 +398,11 @@ diagnostics</a></li>
 <h2>Top line</h2>
 <ul>
 <li><strong>IRON_ORE</strong> Jun 2026: <strong>234.9 Mt</strong> (80%
-CI 231.2 – 237.9). Quarter 54% observed. Change: -2.1 Mt (-0.9%) vs the
-run 1h ago.</li>
+CI 231.2 – 237.9). Quarter 54% observed. Change: +0.0 Mt (+0.0%) vs the
+run 0h ago.</li>
 <li><strong>COAL</strong> Jun 2026: <strong>87.9 Mt</strong> (80% CI
-86.5 – 89.9). Quarter 54% observed. Change: +0.0 Mt (+0.0%) vs the run
-1h ago.</li>
+86.5 – 89.9). Quarter 54% observed. Change: -0.0 Mt (-0.0%) vs the run
+0h ago.</li>
 </ul>
 </div>
 <div id="headline-current-quarter-nowcasts-mt" class="section level2">
@@ -607,47 +612,72 @@ whose current quarter has no prior nowcast.</caption>
 <tr class="odd">
 <td align="left">iron_ore</td>
 <td align="left">2026-06-30</td>
-<td align="right">237.05</td>
 <td align="right">234.92</td>
-<td align="right">-2.13</td>
-<td align="right">-0.9</td>
-<td align="right">1.1</td>
+<td align="right">234.92</td>
+<td align="right">0</td>
+<td align="right">0</td>
+<td align="right">0.4</td>
 </tr>
 <tr class="even">
 <td align="left">coal</td>
 <td align="left">2026-06-30</td>
 <td align="right">87.94</td>
 <td align="right">87.94</td>
-<td align="right">0.00</td>
-<td align="right">0.0</td>
-<td align="right">1.1</td>
+<td align="right">0</td>
+<td align="right">0</td>
+<td align="right">0.4</td>
 </tr>
 </tbody>
 </table>
 </div>
-<div id="methodology-footnote" class="section level2">
-<h2>Methodology footnote</h2>
-<p>For each commodity <span class="math inline">\(c \in
-\{\text{iron\_ore}, \text{coal}\}\)</span>, quarterly frequency:</p>
-<p><span class="math display">\[\log V_{c,Q} = \beta_0 + \beta_1 \log
-T^{SA}_{c,Q} + \beta_2 \log V_{c,Q-1} + \varepsilon_{c,Q}\]</span></p>
+<div id="methodology" class="section level2">
+<h2>Methodology</h2>
+<div id="production-equation-per-commodity" class="section level3">
+<h3>Production equation per commodity</h3>
+<p>These are the actual equations driving the headline nowcast above.
+They’re picked per commodity by walk-forward backtest RMSE from a bench
+of <code>{aggregate, midas, bojo, equal_avg, inv_mse}</code> specs.</p>
+<div id="iron-ore-bojo-spec" class="section level4">
+<h4>Iron ore — <code>bojo</code> spec</h4>
+<p><span class="math display">\[\Delta_{4}\log V_{Q} \;=\; 0.009 \;+
+0.502 \,\Delta_{4}\log T_{Q} \;+\; \varepsilon_{Q}\]</span></p>
+<p>Wald test of <span class="math inline">\(\beta_{lag4}=1\)</span>:
+aggregate p = 0.36, midas p = 0.71. Restriction not rejected; pure
+YoY-on-YoY wins the OOS leaderboard at RMSE = 4.49 Mt (0.78× naive).</p>
+</div>
+<div id="coal-aggregate-spec" class="section level4">
+<h4>Coal — <code>aggregate</code> spec</h4>
+<p><span class="math display">\[\log V_{Q} \;=\; 1.196 \;+ 0.774
+\,\Delta_{4}\log T_{Q} \;+ 0.732 \,\log V_{Q-4} \;+\;
+\varepsilon_{Q}\]</span></p>
+<p>Wald test of <span class="math inline">\(\beta_{lag4}=1\)</span>:
+aggregate p = 0.00, midas p = 0.00. Restriction rejected; the free
+seasonal-anchor coefficient is doing real work (β₄ ≈ 0.73). OOS RMSE =
+2.14 Mt (0.50× naive).</p>
+</div>
+</div>
+<div id="conventions" class="section level3">
+<h3>Conventions</h3>
 <ul>
-<li><span class="math inline">\(V_{c,Q}\)</span> = DISR Resources &amp;
-Energy Quarterly Table 16, physical tonnage (Mt) by commodity. Coal is
-metallurgical + thermal summed.</li>
-<li><span class="math inline">\(T^{SA}_{c,Q}\)</span> = STL
-seasonally-adjusted quarterly PortWatch tonnage, summed across ports
-whose <code>commodity_class</code> matches <span class="math inline">\(c\)</span>. Tanker tonnage at LNG-whitelisted
-ports routes to <code>lng</code> at ingestion but is then scoped out of
-the bridge panel (LNG was dropped 2026-04-21 after zero-correlation
-finding).</li>
-<li>Fit window: 2019-Q1 → 2023-Q4 (RHS-constrained by PortWatch
-coverage). Validation: 2024-Q1 onward.</li>
-<li>Newey-West HAC standard errors with <code>lag = 1</code> at
-quarterly frequency.</li>
-<li>Uncertainty bands: residual bootstrap, scaled by <span class="math inline">\(\sqrt{1 - \text{share\_observed}}\)</span> so
-bands collapse as the current quarter fills in.</li>
+<li><span class="math inline">\(V_{Q}\)</span> is DISR Resources &amp;
+Energy Quarterly Table 16 physical tonnage (Mt) for the commodity. Coal
+is metallurgical + thermal summed.</li>
+<li><span class="math inline">\(T_{Q}\)</span> is PortWatch AIS daily
+tonnage summed across the commodity’s ports over quarter <span class="math inline">\(Q\)</span>. The current-quarter partial-month
+scale-up anchors on the data’s latest observation date (not
+<code>Sys.Date()</code>), so PortWatch’s 7–14 day refresh lag doesn’t
+bias the estimate down.</li>
+<li><span class="math inline">\(\Delta_{4}\)</span> is the year-on-year
+log difference. The YoY transform strips deterministic seasonality, so
+no explicit STL / X-13 step is needed at our sample size (n ≈ 23
+quarters).</li>
+<li>Newey-West HAC standard errors with <code>lag = 1</code>.
+Uncertainty bands from residual bootstrap, scaled by <span class="math inline">\(\sqrt{1 - \text{share\_observed}}\)</span> so they
+collapse as the current quarter fills in.</li>
+<li>Full derivation, candidate bench, and the literature this draws on:
+<a href="https://github.com/DavidAStephan/ResourceExplorer/blob/main/docs/METHODOLOGY.md"><code>docs/METHODOLOGY.md</code></a>.</li>
 </ul>
+</div>
 </div>
 
 
