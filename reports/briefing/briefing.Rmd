@@ -332,14 +332,127 @@ if (nrow(nowcast) == 0 || nrow(delta) == 0) {
 }
 ```
 
-## Methodology footnote
+## Methodology
 
-For each commodity $c \in \{\text{iron\_ore}, \text{coal}\}$, quarterly frequency:
+```{r prod-equations-setup, include=FALSE}
+fits_bench <- safe_read_wh("derived_bridge_fits_bench")
+oos_csv    <- safe_read_csv(path(outputs, "bridge_diagnostics.csv"))
 
-$$\log V_{c,Q} = \beta_0 + \beta_1 \log T^{SA}_{c,Q} + \beta_2 \log V_{c,Q-1} + \varepsilon_{c,Q}$$
+fmt_signed <- function(x, digits = 3) {
+  if (!is.finite(x)) return("")
+  paste0(if (x >= 0) "+ " else "- ", formatC(abs(x), digits = digits,
+                                              format = "f"))
+}
 
-- $V_{c,Q}$ = DISR Resources & Energy Quarterly Table 16, physical tonnage (Mt) by commodity. Coal is metallurgical + thermal summed.
-- $T^{SA}_{c,Q}$ = STL seasonally-adjusted quarterly PortWatch tonnage, summed across ports whose `commodity_class` matches $c$. Tanker tonnage at LNG-whitelisted ports routes to `lng` at ingestion but is then scoped out of the bridge panel (LNG was dropped 2026-04-21 after zero-correlation finding).
-- Fit window: 2019-Q1 → 2023-Q4 (RHS-constrained by PortWatch coverage). Validation: 2024-Q1 onward.
-- Newey-West HAC standard errors with `lag = 1` at quarterly frequency.
-- Uncertainty bands: residual bootstrap, scaled by $\sqrt{1 - \text{share\_observed}}$ so bands collapse as the current quarter fills in.
+# Build a per-commodity entry with the production equation string and a
+# one-line "why" sentence drawing on the live OOS leaderboard.
+build_eq_entry <- function(com) {
+  prod_row <- oos_csv |>
+    filter(commodity == com,
+           isTRUE(production_choice) | production_choice %in% c(TRUE,"TRUE","true")) |>
+    slice(1)
+  if (nrow(prod_row) == 0) return(NULL)
+
+  spec <- prod_row$spec[1]
+
+  oos_c <- oos_csv |> filter(commodity == com) |> arrange(rmse_valid)
+  best  <- oos_c$rmse_valid[1]
+  naive <- oos_c$rmse_naive[1]
+  ratio <- best / naive
+
+  # Equation TeX + a Wald-pvalue narrative pulled from the same row.
+  is_single <- length(fits_bench) > 0 &&
+               paste0(com, "__", spec) %in% names(fits_bench)
+  fit_key   <- paste0(com, "__", spec)
+
+  if (is_single) {
+    co <- stats::coef(fits_bench[[fit_key]]$fit)
+    if (spec == "aggregate") {
+      eq <- sprintf(
+        "\\log V_{Q} \\;=\\; %.3f \\;%s \\,\\Delta_{4}\\log T_{Q} \\;%s \\,\\log V_{Q-4} \\;+\\; \\varepsilon_{Q}",
+        co[["(Intercept)"]],
+        fmt_signed(co[["yoy_log_tonnage"]], 3),
+        fmt_signed(co[["log_volume_lag4"]], 3)
+      )
+    } else if (spec == "midas") {
+      eq <- sprintf(
+        "\\log V_{Q} \\;=\\; %.3f \\;%s \\,\\Delta_{4}\\log T_{Q,m1} \\;%s \\,\\Delta_{4}\\log T_{Q,m2} \\;%s \\,\\Delta_{4}\\log T_{Q,m3} \\;%s \\,\\log V_{Q-4} \\;+\\; \\varepsilon_{Q}",
+        co[["(Intercept)"]],
+        fmt_signed(co[["yoy_log_tonnage_m1"]], 3),
+        fmt_signed(co[["yoy_log_tonnage_m2"]], 3),
+        fmt_signed(co[["yoy_log_tonnage_m3"]], 3),
+        fmt_signed(co[["log_volume_lag4"]], 3)
+      )
+    } else if (spec == "bojo") {
+      eq <- sprintf(
+        "\\Delta_{4}\\log V_{Q} \\;=\\; %.3f \\;%s \\,\\Delta_{4}\\log T_{Q} \\;+\\; \\varepsilon_{Q}",
+        co[["(Intercept)"]],
+        fmt_signed(co[["yoy_log_tonnage"]], 3)
+      )
+    } else {
+      eq <- ""
+    }
+  } else {
+    # Combination winner: show the weighted sum across components.
+    comps <- oos_c |> filter(spec %in% c("aggregate","midas","bojo")) |>
+                       arrange(rmse_valid)
+    eq <- sprintf(
+      "\\hat V_{Q}^{\\,%s} \\;=\\; \\sum_{i \\in \\{%s\\}} w_i \\hat V_{Q}^{\\,(i)}",
+      spec, paste(comps$spec, collapse = ", ")
+    )
+  }
+
+  # Lock4 Wald p sentence -- pull from this commodity's *single* specs.
+  agg_p <- oos_c |> filter(spec == "aggregate") |> dplyr::pull(beta_lag4_eq_1_pval)
+  mid_p <- oos_c |> filter(spec == "midas")     |> dplyr::pull(beta_lag4_eq_1_pval)
+  wald_line <- if (length(agg_p) && length(mid_p) &&
+                   is.finite(agg_p[1]) && is.finite(mid_p[1])) {
+    sprintf("Wald test of $\\beta_{lag4}=1$: aggregate p = %.2f, midas p = %.2f.",
+            agg_p[1], mid_p[1])
+  } else { "" }
+
+  rationale <- if (spec == "bojo") {
+    sprintf("%s Restriction not rejected; pure YoY-on-YoY wins the OOS leaderboard at RMSE = %.2f Mt (%.2f× naive).",
+            wald_line, best, ratio)
+  } else if (spec == "aggregate") {
+    sprintf("%s Restriction rejected; the free seasonal-anchor coefficient is doing real work (β₄ ≈ %.2f). OOS RMSE = %.2f Mt (%.2f× naive).",
+            wald_line,
+            unname(stats::coef(fits_bench[[fit_key]]$fit)["log_volume_lag4"]),
+            best, ratio)
+  } else if (spec == "midas") {
+    sprintf("%s OOS RMSE = %.2f Mt (%.2f× naive); within-quarter monthly timing carries enough signal to justify the extra parameters.",
+            wald_line, best, ratio)
+  } else {
+    sprintf("Combination of single-spec forecasts; OOS RMSE = %.2f Mt (%.2f× naive).",
+            best, ratio)
+  }
+
+  list(spec = spec, eq = eq, rationale = rationale)
+}
+
+iron_eq <- build_eq_entry("iron_ore")
+coal_eq <- build_eq_entry("coal")
+```
+
+### Production equation per commodity
+
+These are the actual equations driving the headline nowcast above. They're picked per commodity by walk-forward backtest RMSE from a bench of `{aggregate, midas, bojo, equal_avg, inv_mse}` specs.
+
+```{r prod-equations-show, results='asis'}
+emit <- function(label, entry) {
+  if (is.null(entry)) return(invisible())
+  cat(sprintf("\n#### %s — `%s` spec\n\n", label, entry$spec))
+  cat(sprintf("$$%s$$\n\n", entry$eq))
+  cat(entry$rationale, "\n\n")
+}
+emit("Iron ore", iron_eq)
+emit("Coal",     coal_eq)
+```
+
+### Conventions
+
+- $V_{Q}$ is DISR Resources & Energy Quarterly Table 16 physical tonnage (Mt) for the commodity. Coal is metallurgical + thermal summed.
+- $T_{Q}$ is PortWatch AIS daily tonnage summed across the commodity's ports over quarter $Q$. The current-quarter partial-month scale-up anchors on the data's latest observation date (not `Sys.Date()`), so PortWatch's 7–14 day refresh lag doesn't bias the estimate down.
+- $\Delta_{4}$ is the year-on-year log difference. The YoY transform strips deterministic seasonality, so no explicit STL / X-13 step is needed at our sample size (n ≈ 23 quarters).
+- Newey-West HAC standard errors with `lag = 1`. Uncertainty bands from residual bootstrap, scaled by $\sqrt{1 - \text{share\_observed}}$ so they collapse as the current quarter fills in.
+- Full derivation, candidate bench, and the literature this draws on: [`docs/METHODOLOGY.md`](https://github.com/DavidAStephan/ResourceExplorer/blob/main/docs/METHODOLOGY.md).
