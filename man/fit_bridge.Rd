@@ -2,63 +2,23 @@
 % Please edit documentation in R/bridge.R
 \name{fit_bridge}
 \alias{fit_bridge}
-\title{Fit per-commodity bridge regressions (per-commodity spec)}
+\title{Back-compat single-spec wrapper kept so any external caller using
+\code{cfg$bridge$spec[[c]]} still works. Returns the one-spec-per-commodity
+list with the shape the old code expected.}
 \usage{
 fit_bridge(features, cfg)
 }
 \arguments{
-\item{features}{Quarterly feature tibble from \code{\link[=build_features]{build_features()}}.}
+\item{features}{Quarterly feature tibble.}
 
-\item{cfg}{Config list. Uses \code{cfg$sample$train_end}, \code{cfg$commodities},
-\code{cfg$bridge$hac_lag}, \code{cfg$bridge$min_n}.}
+\item{cfg}{Config list with \code{cfg$bridge$spec[[commodity]] = "aggregate" | "midas" | "bojo"}.}
 }
 \value{
-Named list keyed by commodity. Each element is a list with:
-\itemize{
-\item \code{fit}: the \code{lm} object
-\item \code{vcov_hac}: Newey-West variance-covariance matrix
-\item \code{residuals}: named numeric vector
-\item \code{diagnostics}: one-row tibble (n_obs, r_squared, rmse_train,
-dw_stat, beta_tonnage, beta_tonnage_se)
-}
+Named list keyed by commodity (same shape as the pre-bench
+\code{fit_bridge} output).
 }
 \description{
-\strong{Two specifications, both with a year-ago LHS lag as the seasonal
-anchor.} Choice per commodity via \code{cfg$bridge$spec} (default:
-\code{"aggregate"} if unspecified).
-}
-\details{
-\itemize{
-\item \strong{aggregate} (parsimonious, 3 params + intercept):
-\deqn{\log V_{c,Q} = \beta_0 + \beta_T \, \Delta_{Q,Q-4}\log T_{c,Q} + \beta_4 \log V_{c,Q-4} + \varepsilon_{c,Q}}
-\item \strong{midas} (flexible, 5 params + intercept):
-\deqn{\log V_{c,Q} = \beta_0 + \sum_{m=1}^{3} \beta_m \, \Delta_{Q,Q-4}\log T_{c,Q,m} + \beta_4 \log V_{c,Q-4} + \varepsilon_{c,Q}}
-}
-
-Why per-commodity: MIDAS wins when within-quarter monthly betas
-legitimately differ (iron_ore: β_m1 dominates — early-quarter
-shipping is a leading indicator). Aggregate wins when the monthly
-betas would be roughly equal (coal: all three near-equal, so the
-extra params just inflate variance). 2026-04-21 backtest showed
-iron_ore improves 5\% under MIDAS and coal degrades 16\%; split spec
-is best-of-both.
-
-\code{V} is DISR REQ Table 16 physical quarterly tonnage (Mt); YoY
-differencing on the RHS mechanically strips seasonality so no
-X-13 / STL is applied. Newey-West HAC standard errors with
-\code{lag = cfg$bridge$hac_lag}.
-
-\strong{Why no log price.} The target is already a \emph{volume} measure
-(chain-volume, reference year 2022-23). Price effects are stripped
-on the LHS by construction; adding \verb{log P} on the RHS would fit a
-coefficient the target has nothing to tie it to. Volume ~ tonnage is
-the relationship the bridge identifies.
-
-\strong{Guardrails.}
-\itemize{
-\item Commodities with fewer than \code{cfg$bridge$min_n} training quarters
-are skipped.
-\item Any regressor (or LHS) with near-zero variance skips with a warning.
-\item \code{nw_vcov()} failures (rare — usually singular design) skip.
-}
+Back-compat single-spec wrapper kept so any external caller using
+\code{cfg$bridge$spec[[c]]} still works. Returns the one-spec-per-commodity
+list with the shape the old code expected.
 }

@@ -2,12 +2,13 @@
 % Please edit documentation in R/bridge.R
 \name{predict_bridge}
 \alias{predict_bridge}
-\title{Predict from fitted bridge models}
+\title{Predict log V_Q from a single fit object regardless of spec.}
 \usage{
 predict_bridge(fits, newdata)
 }
 \arguments{
-\item{fits}{Output of \code{\link[=fit_bridge]{fit_bridge()}}.}
+\item{fits}{Named list of fit objects (output of \code{\link[=fit_bridge]{fit_bridge()}} or
+\code{\link[=fit_bridge_bench]{fit_bridge_bench()}}).}
 
 \item{newdata}{Long feature tibble for the horizon to predict.}
 }
@@ -15,8 +16,7 @@ predict_bridge(fits, newdata)
 Tibble: \code{quarter_end}, \code{commodity}, \code{yhat_log}, \code{yhat_volume_Mt}.
 }
 \description{
-With a year-ago lag (\code{log_volume_lag4}), multi-step forecasts do NOT
-need recursion: quarter Q's lag is Q-4's OBSERVED volume, which is
-always known once it's landed. \code{newdata} must carry
-\code{yoy_log_tonnage_sa} and \code{log_volume_lag4} columns.
+Handles the bojo back-transform: when the lm fitted Δ_4 log V on
+Δ_4 log T, \code{predict()} returns the YoY-Δ scale; we add
+\code{log_volume_lag4} from the prediction row to recover log_volume.
 }

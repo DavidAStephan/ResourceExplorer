@@ -116,20 +116,35 @@ if (nrow(features) > 0L) {
   cfg_live$sample$train_end <- as.character(max(features$quarter_end))
 }
 
-bridge_fits <- run_step_rds("derived_bridge_fits",
-  function() fit_bridge(features, cfg_live),
+# Fit every candidate spec on the live training sample, then run the
+# walk-forward backtest (one fit per candidate per validation quarter).
+bridge_fits_bench <- run_step_rds("derived_bridge_fits_bench",
+  function() fit_bridge_bench(features, cfg_live),
   deps = wh_path("derived_features", cfg))
 
 backtest_results <- run_step("derived_backtest_results",
   function() backtest_rmse(features, cfg),
   deps = wh_path("derived_features", cfg))
 
+# Augment backtest with combination forecasts (equal_avg, inv_mse),
+# build OOS diagnostics, and pick the per-commodity production choice.
+backtest_aug <- augment_with_combinations(backtest_results)
+oos          <- oos_diagnostics(backtest_aug)
+choice       <- production_choice(oos)
+prod_models  <- select_production_models(bridge_fits_bench, oos, choice, cfg)
+
+production_label <- if (nrow(choice) > 0) {
+  stats::setNames(choice$production_spec, choice$commodity)
+} else {
+  NULL
+}
+
 nowcast_current <- run_step("derived_nowcast_current",
-  function() run_nowcast(bridge_fits, features, cfg,
+  function() run_nowcast(prod_models, features, cfg,
                          portwatch  = raw_portwatch,
                          ports_meta = ports_meta),
-  deps = c(wh_path("derived_bridge_fits", cfg),
-           wh_path("derived_features",    cfg),
+  deps = c(wh_path("derived_bridge_fits_bench", cfg),
+           wh_path("derived_features",          cfg),
            wh_path("raw_portwatch_tonnage_daily", cfg)))
 
 anomalies <- detect_anomalies(raw_portwatch, cfg)
@@ -138,7 +153,8 @@ save_nowcast_run(cfg, nowcast_current)
 # --- outputs ---------------------------------------------------------------
 
 csv_paths <- write_csv_outputs(nowcast_current, raw_portwatch,
-                               bridge_fits, backtest_results, cfg)
+                               bridge_fits_bench, backtest_aug, cfg,
+                               production_label = production_label)
 
 if (!SKIP_REPORT) {
   render_briefing("reports/briefing/briefing.Rmd",

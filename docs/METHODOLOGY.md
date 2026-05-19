@@ -5,211 +5,295 @@ you're reading source to understand a modelling choice, start here.
 
 ## 1. Goal
 
-Nowcast Australian **quarterly real goods exports** — specifically
-the chain-volume *goods credits* series from ABS 5302.0 (Balance of
-Payments) — using higher-frequency indicators that land before the
-BoP release.
+Nowcast **quarterly physical-tonnage exports** of two Australian
+commodities — iron ore and coal — from IMF PortWatch AIS daily tonnage
+plus the most-recent DISR Resources & Energy Quarterly (REQ) Table 16
+release, well before the next DISR publication.
 
 The headline success metric is RMSE ≥ 30% below a seasonal-random-walk
-benchmark on 2024+ out-of-sample quarters.
+benchmark on 2024+ out-of-sample quarters. Both commodities currently
+beat that target by a comfortable margin (see § 6).
+
+**Scope note.** The project was originally framed around ABS 5302.0
+chain-volume goods credits with three commodities + a residual bucket.
+That scope was narrowed on 2026-04-21 after a backtest showed:
+
+1. LNG tanker tonnage from PortWatch has near-zero correlation with
+   ABS LNG export volumes at quarterly grain (LNG flows are
+   contract-driven, not vessel-call-driven).
+2. The residual "other" bucket added more variance than signal.
+
+Iron ore + coal account for ~65% of Australian resource exports by
+value and ~85% by volume, so the narrower scope still covers the
+bulk of the question being asked.
 
 ## 2. Data
 
 | Source | Series | Frequency | Role |
 |---|---|---|---|
-| IMF PortWatch | AUS port tonnage by commodity | Daily | RHS of bridge — leading indicator |
-| ABS 5368.0 (ITG, Tables 12a/12b) | FOB exports by SITC 3-digit | Monthly | LHS of bridge |
-| ABS 5302.0 (BoP, Tables 1–2) | Goods credits: current + chain-volume | Quarterly | **Nowcast target** |
-| FRED | `PIORECRUSDM`, `PCOALAUUSDM`, `PNGASJPUSDM` | Monthly | RHS of bridge (price) |
+| IMF PortWatch (ArcGIS FeatureServer) | AUS port AIS tonnage by commodity | Daily | RHS indicator |
+| DISR Resources & Energy Quarterly, Table 16 (kt / Mt) | Per-commodity physical export volume | Quarterly | **LHS target** |
+| `inst/extdata/ports_metadata.csv` | Hand-curated port → commodity-bucket map | Static | Joins PortWatch ports to commodity buckets |
 
-The PortWatch daily panel is aggregated to monthly per commodity via
-`ports_metadata.csv`, which maps port_id → commodity bucket. The SITC
-crosswalk (`inst/extdata/sitc_crosswalk.csv`) maps the commodity
-bucket to one or more 3-digit SITC codes used to slice 5368.0.
+No FRED / ABS APIs are called any more. The pipeline runs with no API
+keys.
 
-**Commodity scope (MVP):** iron_ore (SITC 281), coal (SITC 321+322),
-lng (SITC 343 — caveat: includes non-LNG natural gas; LNG dominates
-Australian 343 exports), and "other" as the residual.
+**PortWatch processing.** The IMF FeatureServer exposes raw daily
+export tonnage by vessel type per port. We attach each port to its
+commodity bucket via the static metadata file, then sum
+`export_dry_bulk` for iron-ore and coal ports. Tanker tonnage at the
+LNG-whitelisted ports is routed to a `lng` bucket at ingestion but is
+not consumed downstream (legacy from the original scope; kept for
+auditability).
 
-## 3. Seasonal adjustment
+## 3. Feature panel
 
-- **LHS (ABS 5368.0).** Use ABS's own seasonally-adjusted series
-  where published. Re-adjusting introduces unnecessary degrees of
-  freedom variance.
-- **RHS (PortWatch tonnage).** Raw daily panel aggregated to monthly
-  then seasonally adjusted via `stats::stl()` with `s.window =
-  "periodic"` and `robust = TRUE`. Falls back to the raw series when
-  < 36 monthly observations are available, or when STL errors (rare
-  — logged as a warning). The function keeps the historical name
-  `x13_adjust()` for call-site stability but no longer requires the
-  X-13 binary; see the work-laptop migration note in
-  `R/seasonal_adjust.R`. STL loses X-13's calendar / trading-day
-  adjustments; if residual-seasonality diagnostics flag it, add a
-  working-days-per-month regressor upstream.
-- **RHS (FRED prices).** No seasonal adjustment — commodity prices
-  don't carry a strong calendar-month pattern at this grain.
+`build_features()` produces one row per (commodity, quarter_end) with
+the following key columns:
 
-## 4. Bridge specification
+| column | meaning |
+|---|---|
+| `volume_Mt` | LHS target — DISR REQ T16 physical Mt |
+| `log_volume` | log of LHS |
+| `log_volume_lag4` | year-ago LHS (seasonal anchor) |
+| `yoy_log_volume` | YoY-Δ of LHS (used by the `bojo` spec) |
+| `tonnage_m1`, `tonnage_m2`, `tonnage_m3` | PortWatch tonnage in each month of the quarter |
+| `yoy_log_tonnage` | YoY-Δ of total quarterly PortWatch tonnage |
+| `yoy_log_tonnage_m1` … `_m3` | YoY-Δ of each monthly position |
 
-For each commodity `c` in `{iron_ore, coal, lng}`, monthly frequency `m`:
+**No explicit seasonal adjustment is applied.** The Δ_4 transforms on
+the RHS (and `bojo`'s LHS) strip deterministic seasonality
+mechanically. STL / X-13 functions exist in `R/seasonal_adjust.R` but
+are no longer called by the bridge; they're available for ad-hoc use
+in the dashboard.
+
+This choice matches the closest-analogue literature: Furukawa & Hisano
+(2022, BoJ WP 22-E-19) and Del-Rosario & Quách (2024, AMRO WP) both
+use YoY differencing rather than pre-SA when nowcasting trade from
+AIS-derived indicators, on samples comparable in length to ours.
+
+## 4. Bridge specifications — candidate bench
+
+Three candidate specs are fit for each commodity at every refit (live
+and inside each backtest quarter). Per-commodity production choice is
+made by walk-forward backtest RMSE (§ 6).
+
+### 4.1 Aggregate
+
+Free `β_lag4`, single quarterly tonnage regressor.
 
 $$
-\log y_{c,m}
-  \;=\; \beta_0
-  \;+\; \beta_1 \log T^{\text{SA}}_{c,m}
-  \;+\; \beta_2 \log P_{c,m}
-  \;+\; \beta_3 \log y_{c,m-1}
-  \;+\; \varepsilon_{c,m}
+\log V_{c,Q} \;=\; \beta_0
+  \;+\; \beta_T \, \Delta_{Q,Q-4}\log T_{c,Q}
+  \;+\; \beta_4 \log V_{c,Q-4}
+  \;+\; \varepsilon_{c,Q}
 $$
 
-- $y_{c,m}$ — ABS 5368.0 monthly FOB exports for commodity `c`'s
-  SITC basket (sum across the commodity's SITC rows).
-- $T^{\text{SA}}_{c,m}$ — STL-adjusted monthly tonnage from
-  PortWatch, aggregated across the commodity's ports.
-- $P_{c,m}$ — monthly FRED commodity price.
-- $\varepsilon_{c,m}$ — i.i.d.-in-bootstrap residual.
+### 4.2 Unrestricted MIDAS (U-MIDAS)
 
-**Why log-levels rather than first-differences.** Australian
-commodity values carry persistent level shifts (the 2020–22 iron-ore
-cycle, the 2022 LNG shock) that first-differencing throws away. Log
-on both sides gives additive decomposition into price and quantity
-contributions; `β₁` reads as a tonnage-to-value elasticity. We accept
-the resulting serial correlation and handle it two ways:
+Replaces the single Δ_4 log T with three free monthly betas:
 
-1. The AR(1) lag on `log y` absorbs most persistence in the
-   conditional-mean fit.
-2. Standard errors are Newey-West / HAC with `lag = 3` via the local
-   `nw_vcov()` in `R/hac.R` (Bartlett kernel, no pre-whitening;
-   matches `sandwich::NeweyWest(..., prewhite = FALSE)` to machine
-   precision).
+$$
+\log V_{c,Q} \;=\; \beta_0
+  \;+\; \sum_{m=1}^{3} \beta_{m} \, \Delta_{Q,Q-4}\log T_{c,Q,m}
+  \;+\; \beta_4 \log V_{c,Q-4}
+  \;+\; \varepsilon_{c,Q}
+$$
 
-**Why AR(1) and not richer dynamics.** With ~60 monthly training
-observations per commodity, the parameter budget is tight. One lag
-captures the bulk of the persistence and doubles as the bridge
-mechanism at nowcast time — partial-month tonnage observations
-propagate forward through `log_y_lag1`. Adding more lags or
-cross-commodity regressors is a flagged Phase-5+ extension.
+Three extra parameters; useful when within-quarter timing carries
+signal (e.g., iron ore: the first month of a quarter is the strongest
+indicator of the quarter's total).
 
-**"Other" bucket.** Not fit as a structural bridge. Constructed as
-the residual
+### 4.3 BoJ-style (`bojo`)
 
-$$y_\text{other} = y_\text{total} - (y_\text{iron\_ore} + y_\text{coal} + y_\text{lng})$$
+The literature standard from Furukawa & Hisano (2022) and Del-Rosario
+& Quách (2024). Pure YoY-on-YoY, equivalent to imposing `β_4 = 1` on
+the aggregate spec.
 
-and regressed on total AUS monthly tonnage plus a trade-weighted
-commodity price index (2019–2023 value-share weights).
+$$
+\Delta_{Q,Q-4}\log V_{c,Q} \;=\; \beta_0
+  \;+\; \beta_T \, \Delta_{Q,Q-4}\log T_{c,Q}
+  \;+\; \varepsilon_{c,Q}
+$$
 
-## 5. Chain-volume conversion
+Two parameters total. Beats the others when `β_4` is statistically
+indistinguishable from 1 (our iron-ore case, see § 6).
 
-5302.0 publishes both current-price and chain-volume goods credits.
-We define the quarterly implicit deflator
+### 4.4 Why these three
 
-$$D_Q \;=\; \frac{\text{current}_Q}{\text{chainvol}_Q}$$
+Our specs are nested: `bojo ⊂ aggregate ⊂ midas` in terms of
+parameter count. The bench lets the data tell us which level of
+flexibility is justified, with a Wald test (`β_lag4 = 1`) reported in
+`bridge_diagnostics.csv` as a complementary check.
 
-and apply it to bridge-based current-price predictions:
+## 5. Forecast combination
 
-$$\hat y^{\text{real}}_Q \;=\; \hat y^{\text{curr}}_Q \;/\; \hat D_Q$$
+In addition to the three single-spec candidates, two combinations are
+computed at backtest time:
 
-At nowcast time `D_Q` for the current quarter is unobservable; we use
-the trailing 4-quarter mean as the forecast deflator. This reflects
-the production constraint (same-quarter deflator lands with the BoP
-release) and is the dominant source of error left in the fully-
-observed case.
+- **`equal_avg`** — arithmetic mean of the three single-spec point
+  forecasts at each (commodity, quarter).
+- **`inv_mse`** — weighted mean, weights ∝ `1 / RMSE_oos²` over the
+  full backtest sample.
 
-## 6. Running nowcast — partial-quarter logic
+The "forecast combination puzzle" (Stock & Watson 2004; Aiolfi &
+Timmermann 2006; Timmermann 2006 Handbook of Forecasting) is that
+equal weights often beat more sophisticated weighting schemes
+out-of-sample, especially at small N. We report both so the gap is
+visible. Both go through the same backtest and OOS-RMSE machinery as
+the single specs and compete on equal footing for the per-commodity
+production slot.
 
-Given current date $t$ in quarter $Q$ with months $m_1, m_2, m_3$:
+## 6. Production model selection
 
-- **Completed months within Q** (`month_end < t`): use observed
-  PortWatch monthly tonnage directly.
-- **Current month** (contains `t`): scale partial-month observed
-  tonnage by the commodity's **2019–23 day-of-month cumulative
-  share**. If through day `d` the training panel saw share `s(d)` of
-  the typical month's tonnage, then $\hat T = T^{\text{obs}} / s(d)$.
-  A floor of 0.05 avoids blow-up on day 1.
-- **Future months within Q**: use `seasonal_avg × pace`, where
-  `pace` is the last completed month's tonnage over its own seasonal
-  avg. A pickup in recent pace carries forward.
+For each commodity, the production-deployed model is the single best
+candidate or combination by walk-forward backtest RMSE. The choice is
+recorded in `bridge_diagnostics.csv` (`production_choice = TRUE` for
+the chosen row) and surfaced with a ★ in the briefing's diagnostics
+table.
 
-The three monthly hatted tonnages enter `predict_bridge()` which
-runs the AR(1) lag recursively — month 2's lag is month 1's
-prediction, etc.
+Current (2026-05-19) production picks and walk-forward skill:
 
-## 7. Uncertainty bands
+| commodity | production_spec | OOS RMSE / naive | β_lag4 (p-val if applicable) |
+|---|---|---|---|
+| iron_ore | `bojo` (β_4 imposed = 1) | 0.78 | aggregate p = 0.36, midas p = 0.71 → restriction not rejected |
+| coal | `aggregate` (β_4 free, ≈ 0.73) | 0.50 | p < 0.001 → restriction rejected; mean reversion is real |
 
-Per-commodity residual bootstrap, $B = 1{,}000$ draws:
+Both clear the project's "≥ 30% RMSE reduction vs naive" target.
 
-1. For each draw `b` and commodity `c`, sample three residuals
-   $\hat\varepsilon^{(b)}_{c,m}$ from the in-sample residual vector
-   (with replacement).
-2. Scale each by $\sqrt{1 - s_Q}$ where $s_Q$ is the share of the
-   quarter observed. When $s_Q = 1$, residual variance collapses —
-   only chain-volume-deflator error remains.
-3. Inject the perturbed residual into the recursive forecast: each
-   month's prediction = deterministic mean + scaled residual, then
-   that value becomes month+1's lag. This is the **correct**
-   propagation of uncertainty through the AR(1) — not a static
-   add-to-point-estimate.
-4. Sum across commodities → quarterly current-price total.
-5. Chain-volume convert to real quarterly.
+## 7. Estimation
 
-The `B` real-terms draws form the empirical distribution; we report
-the 10/90th percentiles as the 80% band and the 2.5/97.5th as 95%.
+All specs are OLS with Newey-West HAC standard errors at
+`lag = cfg$bridge$hac_lag` (default 1, appropriate for quarterly data
+with one persistence-absorbing term). HAC computation is the local
+`nw_vcov()` in `R/hac.R` — Bartlett kernel, no pre-whitening,
+matches `sandwich::NeweyWest(..., prewhite = FALSE)` to machine
+precision.
 
-**Per-commodity independent** draws (MVP choice). Joint draws across
-commodities would capture "iron ore + coal both up on China stimulus"
-correlation and can tighten bands when cross-commodity correlation is
-positive. Flagged as a post-MVP polish item.
+**Why no log price.** The target is *physical tonnage* in Mt. Price
+effects are stripped on the LHS by construction. Adding `log P` on
+the RHS would fit a coefficient the target has no mechanical link to.
 
-## 8. Backtest
+**Guardrails** (see `R/bridge.R::fit_bridge_one`):
 
-- **Train window start:** 2019-01-01.
-- **Validation:** quarters from 2024-01-01 forward.
-- **Scheme:** expanding window. At each validation quarter `Q`,
-  refit all bridges on data through end-of-previous-quarter
-  (`floor_date(Q, "quarter") - 1`), run the full nowcast pipeline
-  treating `Q` as the current quarter, compare to 5302.0 actual.
-- **Benchmark:** seasonal random walk at quarterly grain,
-  $\hat y_Q = y_{Q-4}$, applied directly on the 5302.0 chain-volume
-  series.
+- Commodities with fewer than `cfg$bridge$min_n` training quarters
+  are skipped.
+- Any regressor (or LHS) with near-zero variance skips with a warning.
+- HAC failures (rare — usually singular design) skip.
 
-RMSE is computed both unconditionally and ratioed against the
-benchmark. The "ratio vs naive" column in `bridge_diagnostics.csv` is
-the headline skill metric; a value of 0.70 hits the brief's target.
+## 8. Running nowcast — partial-quarter logic
 
-## 9. Anomaly detection (briefing only)
+Given current date `t` in quarter `Q` with months `m_1, m_2, m_3` and
+`effective_today = min(t, max(obs_date))` (the PortWatch coverage may
+lag the calendar by 7–14 days):
+
+- **Completed months relative to effective_today** (`month_end ≤ effective_today`):
+  use observed PortWatch monthly tonnage directly.
+- **Current month** (contains `effective_today`): scale partial-month
+  observed tonnage by the commodity's 2019+ day-of-month cumulative
+  share at the *data's* `d = effective_today - m_floor + 1`. NOT the
+  calendar `Sys.Date()` — that was a bug fixed in May 2026 (issue: the
+  nowcast underestimated by 10–20% because we divided observed
+  tonnage by an expected share computed for days PortWatch hadn't
+  reached). A `sanity_clip_partial()` safety net falls back to the
+  seasonal-norm estimate if the scale-up lands more than 3× off.
+- **Future months relative to effective_today**: use `seasonal_avg × pace`,
+  where `pace` is the last completed month's tonnage over its own
+  seasonal average. A pickup in recent pace carries forward.
+
+The three hatted monthly tonnages enter the prediction frame; the
+production model (single spec or combination) computes the
+point-estimate log volume; `exp()` returns the Mt-scale headline.
+
+## 9. Uncertainty bands
+
+Residual bootstrap, `B = cfg$nowcast$bootstrap_reps` (default 1000):
+
+1. For the production model, sample one residual `ε^(b)` with
+   replacement.
+2. Scale by `√(1 - share_observed)` where `share_observed` is the
+   fraction of the *quarter* elapsed (calendar-based). Bands collapse
+   as the quarter fills in.
+3. Combined production residuals (when the production choice is
+   `equal_avg` or `inv_mse`) are computed in log V space across
+   components via `combined_log_residuals()`. Single-spec choices
+   reuse the lm residuals directly. Bootstrap is i.i.d. resampling
+   from this residual vector.
+4. `V^(b) = exp(point_log + ε^(b) · scale)` per draw.
+5. Bands: 10th/90th percentile = 80% CI; 2.5th/97.5th = 95% CI.
+
+A fixed seed (`cfg$nowcast$seed`, default `20260419`) makes bands
+identical across reruns of identical inputs.
+
+## 10. Backtest
+
+- **Window start:** 2019-Q1 (PortWatch's earliest reliable coverage).
+- **Validation start:** `cfg$sample$valid_start` (default 2024-Q1).
+- **Scheme:** expanding window. For each validation quarter `Q`,
+  refit *every candidate spec* (and the combinations) on data through
+  `Q - one quarter`, predict `Q`, record per-spec error.
+
+Per-spec and combination OOS RMSE is reported in
+`bridge_diagnostics.csv` alongside the in-sample fit. The
+production-choice mechanic in § 6 reads this table.
+
+## 11. Anomaly detection (briefing only)
 
 For each (port, commodity): compute a seasonal daily norm by pooling
 training-window observations over a ±7-day window around each day of
 year. Z-score the last 28 observed days; flag `|z| > 2`. Surfaces in
 the briefing as "departures from seasonal norm".
 
-## 10. Limitations and known sources of error
+## 12. Known limitations / future work
 
-1. **LNG = SITC 343 proxy.** SITC 343 includes non-LNG natural gas;
-   LNG dominates the Australian share, but shifts in pipeline gas
-   exports could bias the bridge. Phase-next: upgrade to HS 2711.11
-   from the ABS Data Explorer.
-2. **"Other" bucket uses total PortWatch tonnage as a proxy for the
-   non-named commodity tonnage.** Fine when named commodities are
-   well-identified, brittle when port-commodity mapping drifts.
-3. **Coal thermal/metallurgical combined.** Different price drivers.
-   Split if residuals warrant.
-4. **Deflator forecast = trailing 4-quarter mean.** Adequate in
-   stable regimes; mis-specifies during rapid terms-of-trade swings
-   (e.g. H2-2022 LNG).
-5. **Bootstrap independence assumption.** Conservative (wider bands)
-   when cross-commodity residuals are correlated.
-6. **Structural-break stability** not formally tested. A
-   `strucchange::Fstats()` pass per commodity would highlight
-   regime-sensitive β's; left for a follow-up.
+1. **Coal thermal/metallurgical combined.** DISR rows 47 + 48 are
+   summed into a single `coal` series. Different price drivers
+   (steelmaking demand vs power-generation demand) and the methodology
+   review of May 2026 flagged splitting as a worthwhile extension.
+2. **YoY-differencing is sensitive to one-off year-ago shocks.** A
+   typhoon-disrupted 2025-Q1 inflates 2026-Q1's YoY growth
+   artificially. Acceptable trade-off given our sample size; flagged
+   in the literature (Adland, Jia & Strandenes 2017).
+3. **Cross-component residual correlation in combinations** is not
+   explicitly modelled. Bootstrap uses i.i.d. resampling of the
+   combined residual series; understates correlation only when
+   draws are joint — for level forecasts this is a second-order issue.
+4. **No structural-break testing.** The AIS↔DISR relationship can
+   shift (composition effects, port congestion regimes, etc.). A
+   `strucchange::Fstats()` pass per commodity is on the follow-up list.
+5. **Deflator forecast = trailing 4-quarter mean.** Vestigial from
+   the ABS-chain-volume era; not used in the current physical-tonnage
+   target. Documented here for archival reasons.
 
-## 11. Reproducibility
+## 13. Reproducibility
 
 `cfg$nowcast$seed` (default `20260419`) controls bootstrap draws.
-Fixed seed means identical bands across runs given identical inputs.
-The pipeline writes every external fetch to the `mart_ingest_runs`
-rds table with `{run_id, started_at, finished_at, rows_written,
-status}` for an after-the-fact audit trail. Package dependencies are
-declared in `DESCRIPTION`; the repo does not pin versions via renv
-because the target work-laptop install uses a CRAN-mirror allow-list
-rather than a lockfile.
+The pipeline writes every external fetch to `mart_ingest_runs` with
+`{run_id, source, started_at, finished_at, rows_written, status}`
+for an after-the-fact audit trail. Run history (one row per nowcast
+per commodity per run) lives in `mart_nowcast_history`, both
+persisted to the `data` branch by the weekly Actions cron.
+
+## 14. References
+
+- Furukawa, K. & Hisano, R. (2022). *A Nowcasting Model of Exports
+  Using Maritime Big Data.* Bank of Japan WP 22-E-19.
+- Del-Rosario, D. & Quách, V. A. (2024). *Nowcasting ASEAN+3 Goods
+  Exports: Bridge and Machine Learning Models and Shipping "Big
+  Data".* AMRO WP.
+- Cerdeiro, D., Komaromi, A., Liu, Y. & Saeed, M. (2020). *World
+  Seaborne Trade in Real Time.* IMF WP 20/57.
+- Adland, R., Jia, H. & Strandenes, S. P. (2017). *Are AIS-based
+  trade volume estimates reliable? The case of crude oil exports.*
+  Maritime Policy & Management 44(5).
+- Bates, J. M. & Granger, C. W. J. (1969). *The combination of
+  forecasts.* Operational Research Quarterly 20(4).
+- Stock, J. H. & Watson, M. W. (2004). *Combination forecasts of
+  output growth in a seven-country data set.* J. Forecasting 23.
+- Aiolfi, M. & Timmermann, A. (2006). *Persistence in forecasting
+  performance and conditional combination strategies.* J.
+  Econometrics 135.
+- Timmermann, A. (2006). *Forecast combinations.* In Handbook of
+  Economic Forecasting, vol. 1.
+- Baffigi, A., Golinelli, R. & Parigi, G. (2002). *Real-time GDP
+  forecasting in the euro area.* Banca d'Italia Temi 456.

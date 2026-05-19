@@ -186,20 +186,45 @@ if (nrow(disr) > 0 && nrow(nowcast) > 0) {
 if (nrow(diag_fit) > 0) {
   diag_fit |>
     mutate(
-      commodity     = factor(commodity, levels = com_levels),
-      beta_tonnage  = sprintf("%.3f (se %.3f)", beta_tonnage, beta_tonnage_se),
-      r_squared     = round(r_squared, 3),
-      rmse_train    = round(rmse_train, 3),
-      dw_stat       = round(dw_stat, 2),
-      rmse_valid    = round(rmse_valid, 2),
-      rmse_naive    = round(rmse_naive, 2),
-      ratio_vs_naive = round(ratio_vs_naive, 2)
+      commodity      = factor(commodity, levels = com_levels),
+      production     = ifelse(isTRUE(production_choice) |
+                              production_choice %in% c("TRUE","true"),
+                              "★", ""),
+      beta_tonnage   = ifelse(is.na(beta_tonnage), "",
+                              sprintf("%.3f (se %.3f)",
+                                      beta_tonnage, beta_tonnage_se)),
+      beta_lag4      = ifelse(is.na(beta_lag4), "",
+                              sprintf("%.3f", beta_lag4)),
+      lag4_eq_1_pval = ifelse(is.na(beta_lag4_eq_1_pval), "",
+                              sprintf("%.3f", beta_lag4_eq_1_pval)),
+      r2_train       = ifelse(is.na(r_squared), "",
+                              sprintf("%.2f", r_squared)),
+      r2_oos         = ifelse(is.na(r_squared_oos), "",
+                              sprintf("%.2f", r_squared_oos)),
+      rmse_valid     = ifelse(is.na(rmse_valid), "",
+                              sprintf("%.2f", rmse_valid)),
+      ratio_vs_naive = ifelse(is.na(ratio_vs_naive), "",
+                              sprintf("%.2f", ratio_vs_naive))
     ) |>
-    arrange(commodity) |>
-    select(commodity, n_obs, r_squared, rmse_train, dw_stat,
-           beta_tonnage, rmse_valid, rmse_naive, ratio_vs_naive) |>
+    arrange(commodity, spec) |>
+    select(`★` = production,
+           commodity, spec,
+           `R²` = r2_train, `R²_oos` = r2_oos,
+           `β_T (se)` = beta_tonnage,
+           `β_lag4` = beta_lag4,
+           `p(β_lag4=1)` = lag4_eq_1_pval,
+           rmse_valid,
+           `RMSE/naive` = ratio_vs_naive) |>
     knitr::kable(
-      caption = "Bridge training fit (`n_obs` = training quarters) and walk-forward validation vs seasonal-random-walk. `ratio_vs_naive` < 1 means the model beats naive."
+      caption = paste(
+        "★ marks the production-deployed spec per commodity (best of the",
+        "candidate set + combinations by backtest RMSE). `R²` is",
+        "in-sample, `R²_oos` is walk-forward out-of-sample.",
+        "`p(β_lag4=1)` is the Wald-test p-value for the YoY-on-YoY",
+        "restriction (NA for `bojo`, which imposes it; `equal_avg` and",
+        "`inv_mse` are combination forecasts and have no in-sample β).",
+        "`RMSE/naive` < 1 means the spec beats the seasonal random walk."
+      )
     )
 }
 ```

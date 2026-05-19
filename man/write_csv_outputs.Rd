@@ -9,7 +9,8 @@ write_csv_outputs(
   portwatch,
   bridge_fits,
   backtest_results,
-  cfg
+  cfg,
+  production_label = NULL
 )
 }
 \arguments{
