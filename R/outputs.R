@@ -15,7 +15,8 @@
 #' @return Invisibly, a named character vector of file paths written.
 #' @export
 write_csv_outputs <- function(nowcast_current, portwatch, bridge_fits,
-                              backtest_results, cfg) {
+                              backtest_results, cfg,
+                              production_label = NULL) {
   out <- cfg$paths$outputs
   fs::dir_create(out)
 
@@ -83,37 +84,41 @@ write_csv_outputs <- function(nowcast_current, portwatch, bridge_fits,
   # Normalise empty fit_diag so the downstream join works.
   if (!"commodity" %in% names(fit_diag)) {
     fit_diag <- tibble::tibble(
-      commodity       = character(),
-      n_obs           = integer(),
-      r_squared       = double(),
-      rmse_train      = double(),
-      dw_stat         = double(),
-      beta_tonnage    = double(),
-      beta_tonnage_se = double()
+      commodity            = character(),
+      spec                 = character(),
+      n_obs                = integer(),
+      r_squared            = double(),
+      rmse_train           = double(),
+      dw_stat              = double(),
+      beta_tonnage         = double(),
+      beta_tonnage_se      = double(),
+      beta_lag4            = double(),
+      beta_lag4_eq_1_pval  = double()
     )
+  }
+  if (!"spec" %in% names(fit_diag)) {
+    # Single-spec back-compat path: fit_bridge() was used instead of
+    # fit_bridge_bench(). Assume aggregate.
+    fit_diag$spec <- "aggregate"
   }
 
-  valid_rmse <- if (nrow(backtest_results) > 0) {
-    backtest_results |>
-      dplyr::group_by(.data$commodity) |>
-      dplyr::summarise(
-        rmse_valid = sqrt(mean(.data$err^2,       na.rm = TRUE)),
-        rmse_naive = sqrt(mean(.data$err_naive^2, na.rm = TRUE)),
-        .groups    = "drop"
-      )
-  } else {
-    tibble::tibble(
-      commodity  = character(),
-      rmse_valid = double(),
-      rmse_naive = double()
-    )
-  }
+  oos <- oos_diagnostics(backtest_results)
 
   diagnostics <- fit_diag |>
-    dplyr::left_join(valid_rmse, by = "commodity") |>
-    dplyr::mutate(
-      ratio_vs_naive = .data$rmse_valid / .data$rmse_naive
-    )
+    dplyr::full_join(oos, by = c("commodity", "spec")) |>
+    dplyr::arrange(.data$commodity, .data$spec)
+
+  # `production_label` is a named character vector keyed by commodity
+  # (e.g. `c(iron_ore = "midas", coal = "equal_avg")`). Mark the row that
+  # matches as `production_choice = TRUE`; everything else FALSE.
+  diagnostics$production_choice <- if (is.null(production_label)) {
+    NA
+  } else {
+    mapply(function(com, spec) {
+      isTRUE(production_label[[com]] == spec)
+    }, diagnostics$commodity, diagnostics$spec)
+  }
+
   readr::write_csv(diagnostics, paths[["bridge_diagnostics"]])
 
   log_info("write_csv_outputs -- wrote %d files to %s", length(paths), out)

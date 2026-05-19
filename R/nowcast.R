@@ -36,62 +36,96 @@ run_nowcast <- function(bridge_fits, features, cfg,
   B     <- cfg$nowcast$bootstrap_reps %||% 1000
   seed  <- cfg$nowcast$seed %||% 20260419
 
-  active_fits <- bridge_fits[!vapply(bridge_fits, is.null, logical(1))]
-  if (length(active_fits) == 0L || is.null(portwatch)) {
+  # Two input shapes are supported:
+  #   1. Production-model bundles from `select_production_models()`,
+  #      keyed by commodity with `weights` + `components`. This is the
+  #      live-pipeline path -- each entry can be a single spec
+  #      (weights = c(spec = 1)) or a weighted combination across
+  #      several candidates.
+  #   2. The old single-fit-per-commodity shape (backwards-compat for
+  #      anyone calling run_nowcast() directly with the output of
+  #      fit_bridge()). We wrap into the bundle shape.
+  prod_models <- coerce_to_production_models(bridge_fits)
+  prod_models <- prod_models[!vapply(prod_models, is.null, logical(1))]
+  if (length(prod_models) == 0L || is.null(portwatch)) {
     return(empty_nowcast_rows(cfg$commodities, q_end, share))
   }
 
+  # Build the prediction-frame using any of the components' specs --
+  # they all share the same feature-row requirements at quarter Q.
+  first_components <- purrr::map(prod_models, function(pm) pm$components[[1]])
   pred_frame <- build_nowcast_pred_frame(
     features  = features,
     portwatch = portwatch,
     cfg       = cfg,
     as_of     = as_of,
-    fits      = active_fits
+    fits      = first_components
   )
-
   if (nrow(pred_frame) == 0L) {
     return(empty_nowcast_rows(cfg$commodities, q_end, share))
   }
 
-  # Point estimate: deterministic one-quarter-ahead prediction per commodity.
-  preds <- predict_bridge(active_fits, pred_frame)
-
-  # Bootstrap bands per commodity.
   set.seed(seed)
   scale_boot <- sqrt(max(1 - share, 0))
 
-  out <- purrr::imap_dfr(active_fits, function(entry, com) {
+  out <- purrr::imap_dfr(prod_models, function(pm, com) {
     com_frame <- dplyr::filter(pred_frame, .data$commodity == com)
-    if (nrow(com_frame) == 0L) {
-      return(one_empty_nowcast_row(com, q_end, share))
-    }
-    co <- stats::coef(entry$fit)
-    res <- as.numeric(entry$residuals)
+    if (nrow(com_frame) == 0L) return(one_empty_nowcast_row(com, q_end, share))
 
-    # Use stats::predict() for the deterministic mean, then add a
-    # bootstrapped residual. Cleaner than unrolling the formula.
-    mean_log <- as.numeric(stats::predict(entry$fit, newdata = com_frame))[1]
+    # Per-component deterministic log V hat
+    component_log <- purrr::map_dbl(names(pm$components), function(spec_name) {
+      entry <- pm$components[[spec_name]]
+      info <- spec_info(spec_name)
+      raw  <- as.numeric(stats::predict(entry$fit, newdata = com_frame))[1]
+      info$to_log_volume(raw, com_frame[1, , drop = FALSE])
+    })
+    point_log <- sum(component_log * pm$weights[names(pm$components)])
+
+    # Residuals to bootstrap from. For a single-spec bundle, these are
+    # exactly that spec's lm residuals (which lives in log V or Δ_4 log V
+    # space depending on spec). For a combination, we compute the
+    # combined log V residual series via [combined_log_residuals()],
+    # which back-transforms `bojo` to log V space first.
+    res <- if (length(pm$components) == 1L) {
+      spec_name <- names(pm$components)[1]
+      entry <- pm$components[[1]]
+      info <- spec_info(spec_name)
+      raw_resid <- as.numeric(entry$residuals)
+      if (spec_name == "bojo") {
+        # Residuals on Δ_4 log V scale are mechanically the same as on
+        # log V scale (subtracting a fixed log_volume_lag4 cancels in
+        # the residual difference).
+        raw_resid
+      } else {
+        raw_resid
+      }
+    } else {
+      combined_log_residuals(pm)
+    }
+    if (length(res) < 2L) {
+      log_warn("run_nowcast[%s]: too few residuals to bootstrap (n=%d)",
+               com, length(res))
+      res <- if (length(res) == 0L) 0 else res
+    }
+
     draws <- replicate(B, {
       eps <- sample(res, 1L, replace = TRUE) * scale_boot
-      exp(mean_log + eps)
+      exp(point_log + eps)
     })
 
-    point <- dplyr::filter(preds, .data$commodity == com)$yhat_volume_Mt[1]
-
     tibble::tibble(
-      commodity                    = com,
-      quarter_end                  = q_end,
-      point_estimate_Mt = point,
-      lower_80                     = unname(stats::quantile(draws, 0.10, na.rm = TRUE)),
-      upper_80                     = unname(stats::quantile(draws, 0.90, na.rm = TRUE)),
-      lower_95                     = unname(stats::quantile(draws, 0.025, na.rm = TRUE)),
-      upper_95                     = unname(stats::quantile(draws, 0.975, na.rm = TRUE)),
-      share_observed               = share,
-      run_timestamp                = Sys.time()
+      commodity         = com,
+      quarter_end       = q_end,
+      point_estimate_Mt = exp(point_log),
+      lower_80          = unname(stats::quantile(draws, 0.10,  na.rm = TRUE)),
+      upper_80          = unname(stats::quantile(draws, 0.90,  na.rm = TRUE)),
+      lower_95          = unname(stats::quantile(draws, 0.025, na.rm = TRUE)),
+      upper_95          = unname(stats::quantile(draws, 0.975, na.rm = TRUE)),
+      share_observed    = share,
+      run_timestamp     = Sys.time()
     )
   })
 
-  # Fill in any fitted commodity we might have lost along the way.
   missing_coms <- setdiff(cfg$commodities, out$commodity)
   if (length(missing_coms)) {
     out <- dplyr::bind_rows(
@@ -100,6 +134,34 @@ run_nowcast <- function(bridge_fits, features, cfg,
     )
   }
   out |> dplyr::arrange(match(.data$commodity, cfg$commodities))
+}
+
+#' Coerce a possibly-old-shape `bridge_fits` argument into the
+#' production-model-bundle shape that run_nowcast expects internally.
+#'
+#' Detects "old shape" by the absence of a `components` field; wraps
+#' each commodity entry into a single-spec bundle with weight 1.
+#' @keywords internal
+coerce_to_production_models <- function(x) {
+  if (length(x) == 0L) return(x)
+  has_components <- vapply(x, function(e) {
+    !is.null(e) && !is.null(e$components)
+  }, logical(1))
+  if (all(has_components | vapply(x, is.null, logical(1)))) return(x)
+  out <- list()
+  for (com in names(x)) {
+    entry <- x[[com]]
+    if (is.null(entry)) { out[[com]] <- NULL; next }
+    spec_name <- entry$spec %||% "aggregate"
+    w <- stats::setNames(1, spec_name)
+    out[[com]] <- list(
+      commodity  = com,
+      spec       = spec_name,
+      weights    = w,
+      components = stats::setNames(list(entry), spec_name)
+    )
+  }
+  out
 }
 
 #' Build the one-row-per-commodity prediction frame for the current quarter

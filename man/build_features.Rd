@@ -38,6 +38,7 @@ Columns:\tabular{ll}{
    \code{log_volume} \tab log of LHS \cr
    \code{log_tonnage_m1} .. \verb{_m3} \tab logs of monthly positions \cr
    \code{log_volume_lag4} \tab year-ago LHS (seasonal anchor) \cr
+   \code{yoy_log_volume} \tab YoY Δ of LHS (used by the \code{bojo} spec) \cr
    \code{yoy_log_tonnage_m1} .. \verb{_m3} \tab YoY Δ of each monthly position (RHS in bridge) \cr
 }
 

@@ -34,4 +34,17 @@ uniform (coal, LNG bulk shipments) this beats a flat pro-rata.
 \strong{Unobserved future months} use \verb{seasonal_avg x pace}, where \code{pace}
 is the ratio of the most-recent complete month's tonnage to its own
 seasonal average. So a pickup in observed pace carries forward.
+
+\strong{PortWatch lag.} IMF's daily-ports endpoint refreshes with a
+multi-day lag; on any given Tuesday, the latest available row is
+typically 7-14 days back. The partial-month scale-up therefore
+anchors on \code{effective_today = min(as_of, max(obs_date))} rather than
+the calendar date \code{as_of}, so we never divide actually-observed
+tonnage by an expected-share computed for days the data doesn't cover
+yet. Backtests still bound \code{effective_today} at the requested \code{as_of}.
+
+\strong{Sanity clip.} A partial-month estimate that lands more than \verb{3x}
+away from \code{seasonal_norm * pace} in either direction is clipped to
+the seasonal-norm value and a warning is logged. Catches partial-
+month divisions that go pathological on tiny day-counts.
 }

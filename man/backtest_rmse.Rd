@@ -2,7 +2,7 @@
 % Please edit documentation in R/backtest.R
 \name{backtest_rmse}
 \alias{backtest_rmse}
-\title{Per-commodity walk-forward backtest vs ABS 5302 T25 chain-volume actuals}
+\title{Per-commodity walk-forward backtest, all candidate specs}
 \usage{
 backtest_rmse(features, cfg)
 }
@@ -12,25 +12,25 @@ backtest_rmse(features, cfg)
 \item{cfg}{Config list.}
 }
 \value{
-Tibble: \code{commodity}, \code{quarter_end}, \code{actual},
+Tibble: \code{commodity}, \code{spec}, \code{quarter_end}, \code{actual},
 \code{point_estimate}, \code{naive_srw}, \code{err}, \code{err_naive}.
 }
 \description{
 Expanding-window refit. For each validation quarter \code{Q} from
-\code{cfg$sample$valid_start} to the last quarter with an ABS T25 actual,
-for each commodity \code{c}:
+\code{cfg$sample$valid_start} to the last quarter with a DISR actual:
 }
 \details{
 \enumerate{
 \item Cut features to \verb{quarter_end <= (Q - one quarter)}.
-\item Refit \code{fit_bridge} on that window.
-\item Predict quarter \code{Q} via \code{predict_bridge} using the \code{Q}'s feature
-row (observed quarterly tonnage).
-\item Record actual (ABS T25), point estimate, and naive seasonal
-random walk (\verb{V_\{Q-4\}}) for the same commodity.
+\item Refit every candidate spec from \code{cfg$bridge$candidates} (default:
+\code{c("aggregate", "midas", "bojo")}) via \code{\link[=fit_bridge_bench]{fit_bridge_bench()}}.
+\item Predict quarter \code{Q} per spec via \code{\link[=predict_bridge]{predict_bridge()}} using \code{Q}'s
+observed feature row.
+\item Record actual (DISR Mt), per-spec point estimate, and the
+seasonal-random-walk benchmark (\verb{V_\{Q-4\}}).
 }
 
-Per-commodity errors are reported; no aggregation across commodities.
-Ratio vs naive per commodity — the brief's 30\%-better target becomes
-a commodity-level check.
+Output is long-format: one row per (commodity × spec × validation
+quarter). Combination forecasts and the production-choice decision
+are computed downstream in \code{R/combination.R} from this tibble.
 }

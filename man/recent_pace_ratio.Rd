@@ -4,9 +4,11 @@
 \alias{recent_pace_ratio}
 \title{Recent pace: last complete month's tonnage / its seasonal average}
 \usage{
-recent_pace_ratio(daily, seasonal_norm, as_of)
+recent_pace_ratio(daily, seasonal_norm, ref_date)
 }
 \description{
-Recent pace: last complete month's tonnage / its seasonal average
+"Last complete month" is the most-recent month-end strictly before
+the reference date (so partial coverage of the reference month never
+biases the pace ratio toward zero).
 }
 \keyword{internal}

@@ -20,6 +20,7 @@
 #' | `log_volume`             | log of LHS                                   |
 #' | `log_tonnage_m1` .. `_m3`| logs of monthly positions                    |
 #' | `log_volume_lag4`        | year-ago LHS (seasonal anchor)               |
+#' | `yoy_log_volume`         | YoY Δ of LHS (used by the `bojo` spec)       |
 #' | `yoy_log_tonnage_m1` .. `_m3` | YoY Δ of each monthly position (RHS in bridge) |
 #'
 #' YoY differencing on each monthly position strips out seasonality
@@ -72,6 +73,11 @@ build_features <- function(portwatch, disr_req, cfg) {
       log_tonnage_m2      = log(pmax(.data$tonnage_m2,  1e-6)),
       log_tonnage_m3      = log(pmax(.data$tonnage_m3,  1e-6)),
       log_volume_lag4     = dplyr::lag(.data$log_volume, 4L),
+      # YoY log-difference of the LHS -- the dependent variable when the
+      # bridge is fit in pure differenced form (`bojo` spec, which
+      # forces beta_lag4 = 1).
+      yoy_log_volume      = .data$log_volume -
+                             dplyr::lag(.data$log_volume, 4L),
       # Aggregate YoY: log ratio of quarterly tonnage totals; for the
       # `spec = "aggregate"` bridge variant.
       yoy_log_tonnage     = .data$log_tonnage -
