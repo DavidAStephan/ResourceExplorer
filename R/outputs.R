@@ -32,13 +32,51 @@ write_csv_outputs <- function(nowcast_current, portwatch, bridge_fits,
                             .data$commodity %in% cfg$commodities)
   readr::write_csv(pw_named, paths[["tonnage_daily"]])
 
-  tonnage_quarterly <- pw_named |>
+  # Raw observed quarterly sum -- correct for all completed quarters,
+  # misleading for the current partial quarter (cliff-drop on the
+  # chart). We mark that quarter explicitly and attach the extrapolated
+  # full-quarter estimate the bridge actually consumes.
+  max_obs <- if (nrow(pw_named) > 0) max(pw_named$obs_date) else as.Date(NA)
+  tonnage_quarterly_raw <- pw_named |>
     dplyr::mutate(
       quarter_end = lubridate::ceiling_date(.data$obs_date, "quarter") - 1
     ) |>
     dplyr::group_by(.data$quarter_end, .data$commodity) |>
     dplyr::summarise(tonnage = sum(.data$tonnage, na.rm = TRUE),
-                     .groups = "drop")
+                     .groups = "drop") |>
+    # A quarter is "complete" if PortWatch coverage extends to or past
+    # its end-date. The most-recent quarter is typically partial.
+    dplyr::mutate(is_complete = !is.na(max_obs) &
+                                .data$quarter_end <= max_obs)
+
+  extrap_quarterly <- tibble::tibble(
+    quarter_end          = as.Date(character()),
+    commodity            = character(),
+    tonnage_extrapolated = double()
+  )
+  if (!is.na(max_obs)) {
+    cur_q_end <- quarter_end(max_obs)
+    extrap_monthly <- extrapolate_quarter_tonnage(
+      pw_named, ports_meta = NULL, cfg = cfg, as_of = max_obs
+    )
+    extrap_quarterly <- extrap_monthly |>
+      dplyr::group_by(.data$commodity) |>
+      dplyr::summarise(
+        tonnage_extrapolated = sum(.data$tonnage_est, na.rm = TRUE),
+        .groups = "drop"
+      ) |>
+      dplyr::mutate(quarter_end = cur_q_end)
+  }
+
+  tonnage_quarterly <- tonnage_quarterly_raw |>
+    dplyr::left_join(extrap_quarterly,
+                     by = c("quarter_end", "commodity")) |>
+    # Only the partial quarter carries an extrapolated total; null it out
+    # for completed quarters where it would duplicate `tonnage`.
+    dplyr::mutate(tonnage_extrapolated = dplyr::if_else(
+      .data$is_complete, NA_real_, .data$tonnage_extrapolated
+    )) |>
+    dplyr::arrange(.data$commodity, .data$quarter_end)
   readr::write_csv(tonnage_quarterly, paths[["tonnage_quarterly"]])
 
   fit_diag <- purrr::map_dfr(bridge_fits, function(f) f$diagnostics)
