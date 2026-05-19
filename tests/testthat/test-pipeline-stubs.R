@@ -73,6 +73,20 @@ test_that("pipeline runs end-to-end with all caches primed (integration)", {
   expect_true(all(fs::file_exists(paths)))
   expect_equal(nrow(nc), length(cfg$commodities))
   expect_s3_class(anoms, "tbl_df")
+
+  # tonnage_quarterly.csv schema: every row has is_complete +
+  # tonnage_extrapolated; the latter is NA on complete rows and finite
+  # on the latest partial row.
+  tq <- readr::read_csv(paths[["tonnage_quarterly"]], show_col_types = FALSE)
+  expect_true(all(c("is_complete", "tonnage_extrapolated") %in% names(tq)))
+  expect_true(all(is.na(tq$tonnage_extrapolated[tq$is_complete])))
+  partial <- dplyr::filter(tq, !.data$is_complete)
+  if (nrow(partial) > 0) {
+    expect_true(all(is.finite(partial$tonnage_extrapolated)))
+    # Extrapolated must be at least as large as raw observed sum -- you
+    # can't shrink a partial-quarter sum by adding in unobserved months.
+    expect_true(all(partial$tonnage_extrapolated >= partial$tonnage))
+  }
 })
 
 test_that("quarter_share_observed is within [0,1]", {

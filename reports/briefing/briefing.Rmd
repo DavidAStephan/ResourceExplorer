@@ -208,19 +208,73 @@ if (nrow(diag_fit) > 0) {
 
 ```{r tonnage-plot, fig.width=9, fig.height=3.5}
 if (nrow(tonnage) > 0) {
-  tonnage |>
+  base <- tonnage |>
     mutate(quarter_end = as.Date(quarter_end),
            commodity   = factor(commodity, levels = com_levels)) |>
     filter(!is.na(commodity),
-           quarter_end >= as.Date("2019-01-01")) |>
-    ggplot(aes(quarter_end, tonnage / 1e6, colour = commodity)) +
-    geom_line() +
-    geom_point(size = 1) +
+           quarter_end >= as.Date("2019-01-01"))
+
+  # PortWatch coverage stops at max(obs_date), so the most-recent quarter
+  # has a raw `tonnage` that under-represents the full quarter. Split:
+  # plot completed quarters as the solid history line; show the partial
+  # quarter as a hollow point at its extrapolated full-quarter value,
+  # connected by a dashed segment.
+  complete <- filter(base, is_complete)
+  partial  <- filter(base, !is_complete, !is.na(tonnage_extrapolated))
+
+  # Bridge segment from last-complete point to partial-extrapolated point
+  bridge_seg <- if (nrow(complete) > 0 && nrow(partial) > 0) {
+    complete |>
+      group_by(commodity) |>
+      filter(quarter_end == max(quarter_end)) |>
+      ungroup() |>
+      transmute(commodity,
+                x = quarter_end, y = tonnage / 1e6) |>
+      left_join(
+        partial |> transmute(commodity,
+                             xend = quarter_end,
+                             yend = tonnage_extrapolated / 1e6),
+        by = "commodity"
+      ) |>
+      filter(!is.na(.data$yend))
+  } else {
+    NULL
+  }
+
+  p <- ggplot() +
+    geom_line(data = complete,
+              aes(quarter_end, tonnage / 1e6, colour = commodity)) +
+    geom_point(data = complete,
+               aes(quarter_end, tonnage / 1e6, colour = commodity),
+               size = 1)
+  if (!is.null(bridge_seg) && nrow(bridge_seg) > 0) {
+    p <- p +
+      geom_segment(data = bridge_seg,
+                   aes(x = x, y = y, xend = xend, yend = yend,
+                       colour = commodity),
+                   linetype = "dashed")
+  }
+  if (nrow(partial) > 0) {
+    p <- p +
+      geom_point(data = partial,
+                 aes(quarter_end, tonnage_extrapolated / 1e6,
+                     colour = commodity),
+                 size = 3, shape = 21, fill = "white", stroke = 1.2)
+  }
+  p +
     facet_wrap(~ commodity, scales = "free_y") +
     labs(x = NULL, y = "Quarterly PortWatch tonnage (Mt)",
-         title = "PortWatch quarterly tonnage by commodity") +
+         title = "PortWatch quarterly tonnage by commodity",
+         caption = paste(
+           "Solid: completed quarters (raw observed PortWatch sum).",
+           "Hollow point: current partial quarter extrapolated to a",
+           "full-quarter total using the same logic the bridge consumes",
+           "(observed past months + day-of-month scale-up for the",
+           "current month + seasonal pace for unobserved future months)."
+         )) +
     theme_minimal() +
-    theme(legend.position = "none")
+    theme(legend.position = "none",
+          plot.caption   = element_text(size = 7, hjust = 0))
 }
 ```
 
