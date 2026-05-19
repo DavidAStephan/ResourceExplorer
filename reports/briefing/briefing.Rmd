@@ -1,23 +1,70 @@
 ---
-title: "Australian Resource Export Volumes — Quarterly Nowcast"
-subtitle: "resourcetracker · per-commodity tonnage nowcast (iron_ore, coal)"
-date: "`r Sys.Date()`"
+title: "Australian Resource Export Volumes"
+subtitle: "Quarterly nowcast — iron ore and coal"
+date: "`r format(Sys.Date(), '%e %B %Y')`"
 output:
   html_document:
     toc: true
+    toc_depth: 2
     self_contained: true
-    theme: cosmo
+    theme: null
+    highlight: null
+    css: style.css
+    mathjax: default
+    md_extensions: "+raw_html"
 params:
   outputs_dir: "../../outputs"
   warehouse_dir: "../../data/warehouse"
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
+                     dev = "png", dpi = 144)
 library(dplyr)
 library(readr)
 library(ggplot2)
 library(fs)
+
+# Unified palette & ggplot theme so charts feel like part of the page,
+# not a foreign bitmap.
+.palette <- list(
+  text       = "#1A1F2C",
+  text_muted = "#5A6478",
+  border     = "#E4E1D9",
+  accent     = "#1C3D5A",
+  accent2    = "#8A4A1F",
+  grid       = "#EFEDE7",
+  bg         = "#FAFAF7"
+)
+theme_rt <- function(base_size = 11) {
+  theme_minimal(base_family = "Inter", base_size = base_size) +
+    theme(
+      plot.background  = element_rect(fill = .palette$bg, colour = NA),
+      panel.background = element_rect(fill = .palette$bg, colour = NA),
+      panel.grid.major = element_line(colour = .palette$grid, size = 0.4),
+      panel.grid.minor = element_blank(),
+      axis.text  = element_text(colour = .palette$text_muted),
+      axis.title = element_text(colour = .palette$text_muted, size = base_size - 1),
+      axis.line.x = element_line(colour = .palette$border, size = 0.5),
+      axis.ticks  = element_line(colour = .palette$border, size = 0.4),
+      strip.text  = element_text(colour = .palette$text, face = "bold",
+                                 hjust = 0, size = base_size + 1),
+      strip.background = element_blank(),
+      plot.title = element_text(colour = .palette$text, face = "bold",
+                                size = base_size + 2,
+                                margin = margin(0, 0, 8, 0)),
+      plot.subtitle = element_text(colour = .palette$text_muted,
+                                   size = base_size - 1,
+                                   margin = margin(0, 0, 12, 0)),
+      plot.caption  = element_text(colour = .palette$text_muted,
+                                   size = base_size - 2, hjust = 0,
+                                   margin = margin(12, 0, 0, 0)),
+      legend.position = "none"
+    )
+}
+theme_set(theme_rt())
+.commodity_colours <- c(iron_ore = .palette$accent,
+                         coal     = .palette$accent2)
 
 outputs <- params$outputs_dir
 wh_dir  <- params$warehouse_dir
@@ -87,58 +134,62 @@ compute_wow_delta <- function(nowcast, history) {
 delta <- compute_wow_delta(nowcast, history)
 ```
 
-## Top line
+## Headline nowcasts
 
 ```{r top-line, results='asis'}
+commodity_label <- function(x) {
+  switch(x,
+         iron_ore = "Iron ore",
+         coal     = "Coal",
+         tools::toTitleCase(gsub("_", " ", x)))
+}
+
 if (nrow(nowcast) == 0) {
-  cat("*No nowcast available this run.*\n")
+  cat('<div class="callout"><span class="label">Status</span>',
+      'No nowcast produced this run.</div>')
 } else {
   nc <- nowcast |>
     mutate(commodity = factor(commodity, levels = com_levels)) |>
     arrange(commodity) |>
     left_join(delta, by = "commodity")
+  share_pct <- round(100 * nc$share_observed[1])
+  qtr_label <- format(as.Date(nc$quarter_end[1]), "%B %Y")
+
+  cat(sprintf(
+    '<p class="kicker">Current quarter — %s · %d%% of the quarter observed</p>\n',
+    qtr_label, share_pct
+  ))
+  cat('<div class="headline-grid">\n')
   for (i in seq_len(nrow(nc))) {
     r <- nc[i, ]
-    change <- if (is.na(r$delta_point)) {
-      "first nowcast for this quarter"
+    delta_class <- if (is.na(r$delta_point)) "flat"
+                   else if (r$delta_point >  0.05) "up"
+                   else if (r$delta_point < -0.05) "down"
+                   else "flat"
+    delta_text <- if (is.na(r$delta_point)) {
+      "First nowcast for this quarter"
     } else {
-      sign_lbl <- if (r$delta_point >= 0) "+" else ""
-      sprintf("%s%.1f Mt (%s%.1f%%) vs the run %.0fh ago",
-              sign_lbl, r$delta_point, sign_lbl, r$delta_pct, r$hours_since)
+      sign_lbl  <- if (r$delta_point >= 0) "+" else "−"
+      sign_pct  <- if (r$delta_pct   >= 0) "+" else "−"
+      hours_lbl <- if (r$hours_since < 24) sprintf("%.0fh ago", r$hours_since)
+                   else sprintf("%.0f days ago", r$hours_since / 24)
+      sprintf("%s%.1f Mt&nbsp;&nbsp;(%s%.1f%%) vs the run %s",
+              sign_lbl, abs(r$delta_point),
+              sign_pct, abs(r$delta_pct),
+              hours_lbl)
     }
-    cat(sprintf(
-      "- **%s** %s: **%.1f Mt** (80%% CI %.1f – %.1f). Quarter %.0f%% observed. Change: %s.\n",
-      toupper(as.character(r$commodity)),
-      format(as.Date(r$quarter_end), "%b %Y"),
+    # Single-line HTML so pandoc treats the whole card as one raw-HTML
+    # block and doesn't paragraph-wrap the inline spans.
+    card_html <- sprintf(
+      '<div class="headline-card"><span class="label">%s</span><div class="value-row"><span class="value">%.1f</span><span class="unit">Mt</span></div><span class="ci">80%% CI · %.1f – %.1f Mt</span><span class="delta %s">%s</span></div>',
+      commodity_label(as.character(r$commodity)),
       r$point_estimate_Mt,
       r$lower_80, r$upper_80,
-      100 * r$share_observed,
-      change
-    ))
+      delta_class, delta_text
+    )
+    cat(card_html, "\n", sep = "")
   }
-}
-```
-
-## Headline: current-quarter nowcasts (Mt)
-
-```{r headline, results='asis'}
-if (nrow(nowcast) == 0) {
-  cat("*No nowcast available this run.*")
-} else {
-  nc <- nowcast |>
-    mutate(commodity = factor(commodity, levels = com_levels)) |>
-    arrange(commodity)
-  for (i in seq_len(nrow(nc))) {
-    r <- nc[i, ]
-    cat(sprintf(
-      "- **%s** (%s): **%.1f Mt**  (80%% CI: %.1f – %.1f Mt).  Share observed: %.0f%%.\n",
-      toupper(as.character(r$commodity)),
-      format(r$quarter_end, "%b %Y"),
-      r$point_estimate_Mt,
-      r$lower_80, r$upper_80,
-      100 * r$share_observed
-    ))
-  }
+  cat('</div>\n')
 }
 ```
 
@@ -158,25 +209,27 @@ if (nrow(disr) > 0 && nrow(nowcast) > 0) {
            commodity   = factor(commodity, levels = com_levels))
 
   ggplot(hist, aes(quarter_end, tonnes_Mt)) +
-    geom_line(colour = "grey40") +
-    geom_point(colour = "grey40", size = 1) +
-    geom_point(data = nc,
-               aes(quarter_end, point_estimate_Mt),
-               colour = "steelblue", size = 3) +
+    geom_line(colour = .palette$text_muted, linewidth = 0.5) +
+    geom_point(colour = .palette$text_muted, size = 1.2) +
     geom_linerange(data = nc,
                    aes(x = quarter_end,
                        ymin = lower_95, ymax = upper_95,
                        y = point_estimate_Mt),
-                   colour = "steelblue", alpha = 0.35, linewidth = 1.2) +
+                   colour = .palette$accent, alpha = 0.25, linewidth = 1.4) +
     geom_linerange(data = nc,
                    aes(x = quarter_end,
                        ymin = lower_80, ymax = upper_80,
                        y = point_estimate_Mt),
-                   colour = "steelblue", alpha = 0.65, linewidth = 1.8) +
-    facet_wrap(~ commodity, scales = "free_y") +
+                   colour = .palette$accent, alpha = 0.55, linewidth = 2.2) +
+    geom_point(data = nc,
+               aes(quarter_end, point_estimate_Mt),
+               colour = .palette$accent, size = 3.4) +
+    facet_wrap(~ commodity, scales = "free_y",
+               labeller = labeller(commodity = c(iron_ore = "Iron ore",
+                                                  coal     = "Coal"))) +
     labs(x = NULL, y = "Quarterly exports (Mt)",
-         title = "Quarterly export volume: history (grey) + current nowcast (blue)") +
-    theme_minimal()
+         title = "DISR quarterly export volume, with current-quarter nowcast",
+         subtitle = "Grey: published DISR Resources & Energy Quarterly Table 16 actuals. Blue: current-quarter nowcast with 80% (dark) and 95% (light) intervals.")
 }
 ```
 
@@ -268,38 +321,37 @@ if (nrow(tonnage) > 0) {
 
   p <- ggplot() +
     geom_line(data = complete,
-              aes(quarter_end, tonnage / 1e6, colour = commodity)) +
+              aes(quarter_end, tonnage / 1e6, colour = commodity),
+              linewidth = 0.6) +
     geom_point(data = complete,
                aes(quarter_end, tonnage / 1e6, colour = commodity),
-               size = 1)
+               size = 1.4)
   if (!is.null(bridge_seg) && nrow(bridge_seg) > 0) {
     p <- p +
       geom_segment(data = bridge_seg,
                    aes(x = x, y = y, xend = xend, yend = yend,
                        colour = commodity),
-                   linetype = "dashed")
+                   linetype = "dashed", linewidth = 0.55)
   }
   if (nrow(partial) > 0) {
     p <- p +
       geom_point(data = partial,
                  aes(quarter_end, tonnage_extrapolated / 1e6,
                      colour = commodity),
-                 size = 3, shape = 21, fill = "white", stroke = 1.2)
+                 size = 3.4, shape = 21, fill = .palette$bg, stroke = 1.4)
   }
   p +
-    facet_wrap(~ commodity, scales = "free_y") +
+    scale_colour_manual(values = .commodity_colours) +
+    facet_wrap(~ commodity, scales = "free_y",
+               labeller = labeller(commodity = c(iron_ore = "Iron ore",
+                                                  coal     = "Coal"))) +
     labs(x = NULL, y = "Quarterly PortWatch tonnage (Mt)",
          title = "PortWatch quarterly tonnage by commodity",
          caption = paste(
-           "Solid: completed quarters (raw observed PortWatch sum).",
+           "Solid line: completed quarters (raw observed PortWatch sum).",
            "Hollow point: current partial quarter extrapolated to a",
-           "full-quarter total using the same logic the bridge consumes",
-           "(observed past months + day-of-month scale-up for the",
-           "current month + seasonal pace for unobserved future months)."
-         )) +
-    theme_minimal() +
-    theme(legend.position = "none",
-          plot.caption   = element_text(size = 7, hjust = 0))
+           "full-quarter total using the same logic the bridge consumes."
+         ))
 }
 ```
 

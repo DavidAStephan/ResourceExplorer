@@ -84,45 +84,33 @@ jobs:
 
       - name: Build Pages site
         id: site
+        env:
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           TODAY=$(date -u +%Y-%m-%d)
           SITE=./_state/site
           mkdir -p "$SITE/history" "$SITE/data"
 
-          # This week's briefing lives at /history/YYYY-MM-DD.html and
-          # is mirrored as /latest.html for a stable bookmark.
+          # This week's briefing lives at /history/YYYY-MM-DD.html and is
+          # mirrored as /latest.html for a stable bookmark.
           cp reports/briefing/briefing.html "$SITE/history/${TODAY}.html"
           cp reports/briefing/briefing.html "$SITE/latest.html"
 
           # CSV outputs alongside, for any reader who wants the raw series.
           cp outputs/*.csv "$SITE/data/"
 
-          # Regenerate the index: reverse-chronological list of dated reports.
-          {
-            echo '<!doctype html><html><head>'
-            echo '<meta charset="utf-8">'
-            echo '<title>resourcetracker -- weekly nowcasts</title>'
-            echo '<style>body{font-family:system-ui,sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem;color:#222}h1{margin-bottom:0.2em}p.lede{color:#555;margin-top:0}ul{padding-left:1.2em;line-height:1.8}a{color:#0a58c2;text-decoration:none}a:hover{text-decoration:underline}.csv{font-size:0.9em;color:#666}</style>'
-            echo '</head><body>'
-            echo '<h1>resourcetracker</h1>'
-            echo '<p class="lede">Weekly nowcast of Australian iron-ore and coal physical-tonnage exports from IMF PortWatch AIS shipping data.</p>'
-            echo "<p><strong>Latest report (rendered ${TODAY}):</strong> <a href=\"latest.html\">latest.html</a></p>"
-            echo '<h2>History</h2><ul>'
-            ls -1 "$SITE/history/" | sort -r | while read -r f; do
-              dt="${f%.html}"
-              echo "<li><a href=\"history/${f}\">${dt}</a></li>"
-            done
-            echo '</ul>'
-            echo '<h2>CSV outputs (latest run)</h2><ul class="csv">'
-            for f in "$SITE/data/"*.csv; do
-              b=$(basename "$f")
-              echo "<li><a href=\"data/${b}\">${b}</a></li>"
-            done
-            echo '</ul>'
-            echo "<p class=\"csv\">Source code: <a href=\"https://github.com/${{ github.repository }}\">${{ github.repository }}</a> &middot; state branch: <a href=\"https://github.com/${{ github.repository }}/tree/data\">data</a></p>"
-            echo '</body></html>'
-          } > "$SITE/index.html"
+          # Shared stylesheet powers both the index and (via self-contained
+          # embedding) the briefing.
+          cp reports/briefing/style.css "$SITE/style.css"
+
+          # Generate the index from a single Rscript template that reads
+          # the live nowcast CSV so the headline numbers on the landing
+          # page match the briefing.
+          Rscript scripts/build_index.R \
+            --site "$SITE" \
+            --today "$TODAY" \
+            --repo "$GH_REPO"
 
           echo "site_dir=$SITE" >> "$GITHUB_OUTPUT"
 
