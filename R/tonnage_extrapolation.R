@@ -55,6 +55,11 @@ extrapolate_quarter_tonnage <- function(portwatch, ports_meta, cfg,
   # derive_portwatch_commodity_rows(); no port_id-based join needed.
   # `ports_meta` is kept in the signature for backwards compatibility but
   # unused here.
+  #
+  # If the configured commodities include the coal split (met/thermal),
+  # fan out PortWatch's `coal` rows so both sub-commodities see the same
+  # tonnage signal -- same logic as `build_features::expand_coal_split`.
+  portwatch <- expand_coal_split(portwatch, cfg$commodities)
   daily <- dplyr::filter(portwatch, !is.na(.data$commodity))
 
   # Anchor on the data, not the calendar. Bound at `as_of` so backtests

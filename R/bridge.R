@@ -129,6 +129,11 @@ fit_bridge_one <- function(features, cfg, com, spec,
 
   diag <- one_spec_diagnostics(fit, vcov_hac, dat, com, spec)
   log_bridge_fit(com, spec, diag)
+  if (is.finite(diag$chow_pval) && diag$chow_pval < 0.05) {
+    log_warn("fit_bridge[%s/%s]: structural-break Chow F=%.2f p=%.3f (break at %s)",
+             com, spec, diag$chow_fstat, diag$chow_pval,
+             format(diag$chow_break_at, "%Y-%m-%d"))
+  }
 
   list(
     fit         = fit,
@@ -175,6 +180,15 @@ spec_info <- function(spec) {
       predict_extra = "log_volume_lag4",
       to_log_volume = function(yhat, pred_row) yhat + pred_row$log_volume_lag4
     ),
+    lagged = list(
+      # Aggregate spec augmented with a 1-quarter-lagged YoY tonnage
+      # term. Tests the Adland-Jia-Strandenes (2017) hypothesis that
+      # AIS leads customs-cleared trade by several weeks.
+      lhs = "log_volume",
+      rhs = c("yoy_log_tonnage", "yoy_log_tonnage_lag1", "log_volume_lag4"),
+      predict_extra = character(),
+      to_log_volume = function(yhat, pred_row) yhat
+    ),
     NULL
   )
 }
@@ -215,6 +229,8 @@ one_spec_diagnostics <- function(fit, vcov_hac, dat, com, spec) {
     }
   }
 
+  chow <- chow_test_midpoint(fit, dat)
+
   tibble::tibble(
     commodity            = com,
     spec                 = spec,
@@ -228,7 +244,10 @@ one_spec_diagnostics <- function(fit, vcov_hac, dat, com, spec) {
     beta_lag4_eq_1_pval  = beta_lag4_eq_1_pval,
     beta_m1              = beta_m1,
     beta_m2              = beta_m2,
-    beta_m3              = beta_m3
+    beta_m3              = beta_m3,
+    chow_fstat           = chow$fstat,
+    chow_pval            = chow$pval,
+    chow_break_at        = chow$break_at
   )
 }
 

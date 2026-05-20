@@ -73,8 +73,10 @@ hist_files <- if (dir_exists(hist_dir)) {
 # ---- card HTML ----
 commodity_label <- function(x) {
   switch(x,
-         iron_ore = "Iron ore",
-         coal     = "Coal",
+         iron_ore     = "Iron ore",
+         coal         = "Coal",
+         coal_met     = "Metallurgical coal",
+         coal_thermal = "Thermal coal",
          tools::toTitleCase(gsub("_", " ", x)))
 }
 # For each commodity in `nc`, find the most-recent prior run in
