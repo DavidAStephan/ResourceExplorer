@@ -98,8 +98,12 @@ jobs:
           cp reports/briefing/briefing.html "$SITE/history/${TODAY}.html"
           cp reports/briefing/briefing.html "$SITE/latest.html"
 
-          # CSV outputs alongside, for any reader who wants the raw series.
+          # CSV outputs + staleness signal, for any reader who wants
+          # the raw series.
           cp outputs/*.csv "$SITE/data/"
+          if [ -f outputs/staleness.json ]; then
+            cp outputs/staleness.json "$SITE/data/"
+          fi
 
           # Shared stylesheet powers both the index and (via self-contained
           # embedding) the briefing.
