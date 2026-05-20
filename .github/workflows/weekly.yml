@@ -46,6 +46,12 @@ jobs:
           r-version: "4.4"
           use-public-rspm: true   # Posit Package Manager binaries
 
+      - name: Set up pandoc
+        # rmarkdown::render() needs pandoc on PATH. setup-renv only
+        # restores R packages; pandoc is a system dep we install
+        # explicitly.
+        uses: r-lib/actions/setup-pandoc@v2
+
       - name: Restore R packages from renv.lock
         uses: r-lib/actions/setup-renv@v2
 
@@ -227,7 +233,7 @@ jobs:
       actions: read     # download the log artifact uploaded by run-pipeline
     steps:
       - name: Download log artifact from run-pipeline
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           name: nowcast-logs-${{ github.run_id }}
           path: ./_logs
