@@ -14,11 +14,18 @@ save_nowcast_run <- function(cfg, nowcast_rows) {
     return(invisible(nowcast_rows))
   }
 
+  # `horizon` was added 2026-05-21 to distinguish current-quarter (h=0)
+  # from one-quarter-ahead (h=1) nowcasts. Existing history rows
+  # don't carry the column; default to 0 for back-compat appending.
+  if (!"horizon" %in% names(nowcast_rows)) {
+    nowcast_rows$horizon <- 0L
+  }
   rows <- nowcast_rows |>
     dplyr::transmute(
       run_timestamp  = .data$run_timestamp,
       commodity      = .data$commodity,
       quarter_end    = .data$quarter_end,
+      horizon        = .data$horizon,
       point_estimate = .data$point_estimate_Mt,
       lower_80       = .data$lower_80,
       upper_80       = .data$upper_80,
@@ -28,7 +35,7 @@ save_nowcast_run <- function(cfg, nowcast_rows) {
     )
 
   wh_append("mart_nowcast_history", rows, cfg,
-            keys = c("run_timestamp", "commodity", "quarter_end"))
+            keys = c("run_timestamp", "commodity", "quarter_end", "horizon"))
   invisible(rows)
 }
 

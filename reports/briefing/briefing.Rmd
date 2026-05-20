@@ -137,7 +137,16 @@ compute_wow_delta <- function(nowcast, history) {
   })
 }
 
-delta <- compute_wow_delta(nowcast, history)
+# WoW delta only meaningful for the in-quarter nowcast (h = 0); the
+# Q+1 forecast has no rolling-comparison anchor that's stable enough
+# to be useful.
+nowcast_h0 <- if ("horizon" %in% names(nowcast)) {
+  dplyr::filter(nowcast, horizon == 0L)
+} else nowcast
+history_h0 <- if (!is.null(history) && nrow(history) > 0 && "horizon" %in% names(history)) {
+  dplyr::filter(history, horizon == 0L)
+} else history
+delta <- compute_wow_delta(nowcast_h0, history_h0)
 ```
 
 ## Headline nowcasts
@@ -156,7 +165,11 @@ if (nrow(nowcast) == 0) {
   cat('<div class="callout"><span class="label">Status</span>',
       'No nowcast produced this run.</div>')
 } else {
+  # Headline cards show the current quarter (h = 0). The next-quarter
+  # outlook (h = 1) renders in its own section below.
+  if (!"horizon" %in% names(nowcast)) nowcast$horizon <- 0L
   nc <- nowcast |>
+    filter(horizon == 0L) |>
     mutate(commodity = factor(commodity, levels = com_levels)) |>
     arrange(commodity) |>
     left_join(delta, by = "commodity")
@@ -201,6 +214,38 @@ if (nrow(nowcast) == 0) {
 }
 ```
 
+```{r next-quarter, results='asis'}
+# Next-quarter forecast (h = 1) -- pure seasonal forecast for unobserved
+# tonnage, fed through the same bridge. Much wider error bars by
+# construction; presented separately so the headline cards stay focused
+# on the in-quarter nowcast.
+if ("horizon" %in% names(nowcast) && any(nowcast$horizon == 1L)) {
+  nq <- nowcast |>
+    filter(horizon == 1L) |>
+    mutate(commodity = factor(commodity, levels = com_levels)) |>
+    arrange(commodity)
+  qlbl <- format(as.Date(nq$quarter_end[1]), "%B %Y")
+  cat(sprintf('<h3 style="margin-top:2rem">Next-quarter outlook &middot; %s</h3>\n', qlbl))
+  cat('<p style="color:var(--text-muted);max-width:640px;margin:0 0 1rem">',
+      'Forecast for the quarter after the headline above, using seasonal',
+      'PortWatch patterns + the most recent observed pace. Bands are',
+      'wider by construction (no in-quarter observations to shrink',
+      'them).</p>\n')
+  cat('<div class="headline-grid">\n')
+  for (i in seq_len(nrow(nq))) {
+    r <- nq[i, ]
+    card_html <- sprintf(
+      '<div class="headline-card"><span class="label">%s &middot; forecast</span><div class="value-row"><span class="value">%.1f</span><span class="unit">Mt</span></div><span class="ci">80%% CI · %.1f – %.1f Mt</span></div>',
+      commodity_label(as.character(r$commodity)),
+      r$point_estimate_Mt,
+      r$lower_80, r$upper_80
+    )
+    cat(card_html, "\n", sep = "")
+  }
+  cat('</div>\n')
+}
+```
+
 ## Nowcast vs recent actuals
 
 ```{r actuals-plot, fig.width=9, fig.height=4.5}
@@ -212,11 +257,17 @@ if (nrow(disr) > 0 && nrow(nowcast) > 0) {
            quarter_end >= as.Date("2019-01-01")) |>
     arrange(commodity, quarter_end)
 
+  if (!"horizon" %in% names(nowcast)) nowcast$horizon <- 0L
   nc <- nowcast |>
+    filter(horizon == 0L) |>
+    mutate(quarter_end = as.Date(quarter_end),
+           commodity   = factor(commodity, levels = com_levels))
+  nc_fwd <- nowcast |>
+    filter(horizon == 1L) |>
     mutate(quarter_end = as.Date(quarter_end),
            commodity   = factor(commodity, levels = com_levels))
 
-  ggplot(hist, aes(quarter_end, tonnes_Mt)) +
+  p <- ggplot(hist, aes(quarter_end, tonnes_Mt)) +
     geom_line(colour = .palette$text_muted, linewidth = 0.5) +
     geom_point(colour = .palette$text_muted, size = 1.2) +
     geom_linerange(data = nc,
@@ -231,12 +282,25 @@ if (nrow(disr) > 0 && nrow(nowcast) > 0) {
                    colour = .palette$accent, alpha = 0.55, linewidth = 2.2) +
     geom_point(data = nc,
                aes(quarter_end, point_estimate_Mt),
-               colour = .palette$accent, size = 3.4) +
+               colour = .palette$accent, size = 3.4)
+  if (nrow(nc_fwd) > 0) {
+    p <- p +
+      geom_linerange(data = nc_fwd,
+                     aes(x = quarter_end,
+                         ymin = lower_80, ymax = upper_80,
+                         y = point_estimate_Mt),
+                     colour = .palette$accent, alpha = 0.35, linewidth = 1.6) +
+      geom_point(data = nc_fwd,
+                 aes(quarter_end, point_estimate_Mt),
+                 shape = 21, fill = .palette$bg,
+                 colour = .palette$accent, size = 3.4, stroke = 1.2)
+  }
+  p +
     facet_wrap(~ commodity, scales = "free_y",
                labeller = labeller(commodity = .commodity_labels)) +
     labs(x = NULL, y = "Quarterly exports (Mt)",
-         title = "DISR quarterly export volume, with current-quarter nowcast",
-         subtitle = "Grey: published DISR Resources & Energy Quarterly Table 16 actuals. Blue: current-quarter nowcast with 80% (dark) and 95% (light) intervals.")
+         title = "DISR quarterly export volume, with current and next-quarter nowcasts",
+         subtitle = "Grey: published DISR T16 actuals. Filled blue: current-quarter nowcast (80/95% bands). Hollow blue: next-quarter forecast (80% band).")
 }
 ```
 
@@ -372,12 +436,12 @@ if (nrow(tonnage) > 0) {
 ```{r delta, results='asis'}
 # Reuse the `delta` tibble from the Top line; join back to nowcast to
 # pull the now-point so this section stands alone.
-if (nrow(nowcast) == 0 || nrow(delta) == 0) {
+if (nrow(nowcast_h0) == 0 || nrow(delta) == 0) {
   cat("*No nowcast available this run.*\n")
 } else if (all(is.na(delta$delta_point))) {
   cat("*First run for every commodity (this quarter) -- no prior to compare against.*\n")
 } else {
-  nowcast |>
+  nowcast_h0 |>
     select(commodity, quarter_end, now_Mt = point_estimate_Mt) |>
     left_join(delta, by = "commodity") |>
     filter(!is.na(delta_point)) |>
@@ -502,7 +566,7 @@ build_eq_entry <- function(com) {
   list(spec = spec, eq = eq, rationale = rationale)
 }
 
-prod_entries <- lapply(unique(nowcast$commodity), function(com) {
+prod_entries <- lapply(unique(nowcast_h0$commodity), function(com) {
   list(com = com, entry = build_eq_entry(com))
 })
 ```

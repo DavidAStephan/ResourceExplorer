@@ -29,111 +29,107 @@
 run_nowcast <- function(bridge_fits, features, cfg,
                         portwatch  = NULL,
                         ports_meta = NULL,
-                        as_of      = Sys.Date()) {
+                        as_of      = Sys.Date(),
+                        horizon    = 0L) {
 
-  q_end <- quarter_end(as_of)
-  share <- quarter_share_observed(as_of)
   B     <- cfg$nowcast$bootstrap_reps %||% 1000
   seed  <- cfg$nowcast$seed %||% 20260419
 
-  # Two input shapes are supported:
-  #   1. Production-model bundles from `select_production_models()`,
-  #      keyed by commodity with `weights` + `components`. This is the
-  #      live-pipeline path -- each entry can be a single spec
-  #      (weights = c(spec = 1)) or a weighted combination across
-  #      several candidates.
-  #   2. The old single-fit-per-commodity shape (backwards-compat for
-  #      anyone calling run_nowcast() directly with the output of
-  #      fit_bridge()). We wrap into the bundle shape.
   prod_models <- coerce_to_production_models(bridge_fits)
   prod_models <- prod_models[!vapply(prod_models, is.null, logical(1))]
   if (length(prod_models) == 0L || is.null(portwatch)) {
-    return(empty_nowcast_rows(cfg$commodities, q_end, share))
-  }
-
-  # Build the prediction-frame using any of the components' specs --
-  # they all share the same feature-row requirements at quarter Q.
-  first_components <- purrr::map(prod_models, function(pm) pm$components[[1]])
-  pred_frame <- build_nowcast_pred_frame(
-    features  = features,
-    portwatch = portwatch,
-    cfg       = cfg,
-    as_of     = as_of,
-    fits      = first_components
-  )
-  if (nrow(pred_frame) == 0L) {
-    return(empty_nowcast_rows(cfg$commodities, q_end, share))
+    return(empty_nowcast_rows(cfg$commodities,
+                              quarter_end(as_of),
+                              quarter_share_observed(as_of)))
   }
 
   set.seed(seed)
-  scale_boot <- sqrt(max(1 - share, 0))
 
-  out <- purrr::imap_dfr(prod_models, function(pm, com) {
-    com_frame <- dplyr::filter(pred_frame, .data$commodity == com)
-    if (nrow(com_frame) == 0L) return(one_empty_nowcast_row(com, q_end, share))
-
-    # Per-component deterministic log V hat
-    component_log <- purrr::map_dbl(names(pm$components), function(spec_name) {
-      entry <- pm$components[[spec_name]]
-      info <- spec_info(spec_name)
-      raw  <- as.numeric(stats::predict(entry$fit, newdata = com_frame))[1]
-      info$to_log_volume(raw, com_frame[1, , drop = FALSE])
-    })
-    point_log <- sum(component_log * pm$weights[names(pm$components)])
-
-    # Residuals to bootstrap from. For a single-spec bundle, these are
-    # exactly that spec's lm residuals (which lives in log V or Δ_4 log V
-    # space depending on spec). For a combination, we compute the
-    # combined log V residual series via [combined_log_residuals()],
-    # which back-transforms `bojo` to log V space first.
-    res <- if (length(pm$components) == 1L) {
-      spec_name <- names(pm$components)[1]
-      entry <- pm$components[[1]]
-      info <- spec_info(spec_name)
-      raw_resid <- as.numeric(entry$residuals)
-      if (spec_name == "bojo") {
-        # Residuals on Δ_4 log V scale are mechanically the same as on
-        # log V scale (subtracting a fixed log_volume_lag4 cancels in
-        # the residual difference).
-        raw_resid
-      } else {
-        raw_resid
-      }
-    } else {
-      combined_log_residuals(pm)
+  # One pass per requested horizon. For `h = 0` the target quarter is
+  # the one containing `as_of`; for `h = 1` we look one quarter ahead
+  # (the bridge's `log_volume_lag4` for Q+1 is Q-3's observed value, so
+  # no recursion is needed). PortWatch coverage of Q+1 is typically
+  # zero, so all three months of Q+1 land in the "future" branch of
+  # `extrapolate_quarter_tonnage` and use `seasonal_norm * pace`.
+  per_horizon <- lapply(horizon, function(h) {
+    target_as_of <- if (h == 0L) as_of else
+      lubridate::ceiling_date(as_of, "quarter") - 1L + h * 92L  # rough; corrected below
+    # Snap to the correct quarter-end for h > 0:
+    if (h != 0L) {
+      target_as_of <- quarter_end(lubridate::floor_date(as_of, "quarter") +
+                                    months(3L * h))
     }
-    if (length(res) < 2L) {
-      log_warn("run_nowcast[%s]: too few residuals to bootstrap (n=%d)",
-               com, length(res))
-      res <- if (length(res) == 0L) 0 else res
-    }
+    q_end <- quarter_end(target_as_of)
+    share <- if (h == 0L) quarter_share_observed(as_of) else 0
+    scale_boot <- sqrt(max(1 - share, 0))
 
-    draws <- replicate(B, {
-      eps <- sample(res, 1L, replace = TRUE) * scale_boot
-      exp(point_log + eps)
-    })
-
-    tibble::tibble(
-      commodity         = com,
-      quarter_end       = q_end,
-      point_estimate_Mt = exp(point_log),
-      lower_80          = unname(stats::quantile(draws, 0.10,  na.rm = TRUE)),
-      upper_80          = unname(stats::quantile(draws, 0.90,  na.rm = TRUE)),
-      lower_95          = unname(stats::quantile(draws, 0.025, na.rm = TRUE)),
-      upper_95          = unname(stats::quantile(draws, 0.975, na.rm = TRUE)),
-      share_observed    = share,
-      run_timestamp     = Sys.time()
+    first_components <- purrr::map(prod_models, function(pm) pm$components[[1]])
+    pred_frame <- build_nowcast_pred_frame(
+      features  = features,
+      portwatch = portwatch,
+      cfg       = cfg,
+      as_of     = target_as_of,
+      fits      = first_components
     )
+    if (nrow(pred_frame) == 0L) {
+      return(empty_nowcast_rows(cfg$commodities, q_end, share) |>
+               dplyr::mutate(horizon = h))
+    }
+
+    rows <- purrr::imap_dfr(prod_models, function(pm, com) {
+      com_frame <- dplyr::filter(pred_frame, .data$commodity == com)
+      if (nrow(com_frame) == 0L) return(one_empty_nowcast_row(com, q_end, share))
+
+      component_log <- purrr::map_dbl(names(pm$components), function(spec_name) {
+        entry <- pm$components[[spec_name]]
+        info <- spec_info(spec_name)
+        raw  <- as.numeric(stats::predict(entry$fit, newdata = com_frame))[1]
+        info$to_log_volume(raw, com_frame[1, , drop = FALSE])
+      })
+      point_log <- sum(component_log * pm$weights[names(pm$components)])
+
+      res <- if (length(pm$components) == 1L) {
+        as.numeric(pm$components[[1]]$residuals)
+      } else {
+        combined_log_residuals(pm)
+      }
+      if (length(res) < 2L) {
+        log_warn("run_nowcast[%s/h=%d]: too few residuals to bootstrap (n=%d)",
+                 com, h, length(res))
+        res <- if (length(res) == 0L) 0 else res
+      }
+
+      draws <- replicate(B, {
+        eps <- sample(res, 1L, replace = TRUE) * scale_boot
+        exp(point_log + eps)
+      })
+
+      tibble::tibble(
+        commodity         = com,
+        quarter_end       = q_end,
+        point_estimate_Mt = exp(point_log),
+        lower_80          = unname(stats::quantile(draws, 0.10,  na.rm = TRUE)),
+        upper_80          = unname(stats::quantile(draws, 0.90,  na.rm = TRUE)),
+        lower_95          = unname(stats::quantile(draws, 0.025, na.rm = TRUE)),
+        upper_95          = unname(stats::quantile(draws, 0.975, na.rm = TRUE)),
+        share_observed    = share,
+        run_timestamp     = Sys.time()
+      )
+    })
+
+    missing_coms <- setdiff(cfg$commodities, rows$commodity)
+    if (length(missing_coms)) {
+      rows <- dplyr::bind_rows(
+        rows,
+        purrr::map_dfr(missing_coms, one_empty_nowcast_row, q_end, share)
+      )
+    }
+    rows |>
+      dplyr::mutate(horizon = h) |>
+      dplyr::arrange(match(.data$commodity, cfg$commodities))
   })
 
-  missing_coms <- setdiff(cfg$commodities, out$commodity)
-  if (length(missing_coms)) {
-    out <- dplyr::bind_rows(
-      out,
-      purrr::map_dfr(missing_coms, one_empty_nowcast_row, q_end, share)
-    )
-  }
-  out |> dplyr::arrange(match(.data$commodity, cfg$commodities))
+  dplyr::bind_rows(per_horizon)
 }
 
 #' Coerce a possibly-old-shape `bridge_fits` argument into the
@@ -227,9 +223,40 @@ build_nowcast_pred_frame <- function(features, portwatch, cfg, as_of, fits) {
     dplyr::transmute(.data$commodity,
                      yoy_log_tonnage_lag1 = .data$yoy_log_tonnage)
 
+  # The `price_aug` spec wants Δ_4 log P for the current quarter. At
+  # nowcast time we use the *latest available* log_price per commodity
+  # from `features` (which averages whatever months of the current
+  # quarter are published so far). Lag 4 is the same-quarter price one
+  # year ago, looked up directly. Skip entirely when the feature panel
+  # has no price column (e.g. price ingest disabled or a fixture in a
+  # unit test) so the join sets `log_price_*` to NA naturally.
+  q_minus4_date <- lubridate::ceiling_date(q_end - lubridate::years(1L),
+                                           "quarter") - 1
+  has_price <- "log_price" %in% names(features)
+  cur_price <- if (has_price) {
+    features |>
+      dplyr::filter(!is.na(.data$log_price)) |>
+      dplyr::group_by(.data$commodity) |>
+      dplyr::slice_max(.data$quarter_end, n = 1L) |>
+      dplyr::ungroup() |>
+      dplyr::transmute(.data$commodity, log_price_now = .data$log_price)
+  } else {
+    tibble::tibble(commodity = character(), log_price_now = double())
+  }
+  lag4_price <- if (has_price) {
+    features |>
+      dplyr::filter(.data$quarter_end == q_minus4_date,
+                    !is.na(.data$log_price)) |>
+      dplyr::transmute(.data$commodity, log_price_lag4 = .data$log_price)
+  } else {
+    tibble::tibble(commodity = character(), log_price_lag4 = double())
+  }
+
   wide_mwq |>
     dplyr::left_join(lag4,         by = "commodity") |>
     dplyr::left_join(prev,         by = "commodity") |>
+    dplyr::left_join(cur_price,    by = "commodity") |>
+    dplyr::left_join(lag4_price,   by = "commodity") |>
     dplyr::left_join(share_by_com, by = "commodity") |>
     dplyr::mutate(
       quarter_end        = q_end,
@@ -242,7 +269,8 @@ build_nowcast_pred_frame <- function(features, portwatch, cfg, as_of, fits) {
       yoy_log_tonnage    = .data$log_tonnage    - .data$log_tonnage_lag4,
       yoy_log_tonnage_m1 = .data$log_tonnage_m1 - .data$log_tonnage_m1_lag4,
       yoy_log_tonnage_m2 = .data$log_tonnage_m2 - .data$log_tonnage_m2_lag4,
-      yoy_log_tonnage_m3 = .data$log_tonnage_m3 - .data$log_tonnage_m3_lag4
+      yoy_log_tonnage_m3 = .data$log_tonnage_m3 - .data$log_tonnage_m3_lag4,
+      yoy_log_price      = .data$log_price_now  - .data$log_price_lag4
     ) |>
     dplyr::select(dplyr::all_of(c(
       "commodity", "quarter_end", "tonnage",
@@ -251,6 +279,7 @@ build_nowcast_pred_frame <- function(features, portwatch, cfg, as_of, fits) {
       "yoy_log_tonnage",
       "yoy_log_tonnage_m1", "yoy_log_tonnage_m2", "yoy_log_tonnage_m3",
       "yoy_log_tonnage_lag1",
+      "yoy_log_price",
       "log_volume_lag4"
     )))
 }

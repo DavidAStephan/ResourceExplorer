@@ -4,7 +4,7 @@
 \alias{build_features}
 \title{Build the MIDAS-style quarterly feature panel}
 \usage{
-build_features(portwatch, disr_req, cfg)
+build_features(portwatch, disr_req, cfg, wb_prices = NULL)
 }
 \arguments{
 \item{portwatch}{Daily tonnage tibble from \code{\link[=fetch_portwatch_tonnage]{fetch_portwatch_tonnage()}}.}
