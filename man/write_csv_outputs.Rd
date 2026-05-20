@@ -23,6 +23,11 @@ write_csv_outputs(
 \item{backtest_results}{Tibble from \code{\link[=backtest_rmse]{backtest_rmse()}}.}
 
 \item{cfg}{Config list.}
+
+\item{production_label}{Optional named character vector keyed by
+commodity (e.g. \code{c(iron_ore = "bojo", coal_met = "midas")}). When
+supplied, the matching \verb{(commodity, spec)} row in
+\code{bridge_diagnostics.csv} is flagged \code{production_choice = TRUE}.}
 }
 \value{
 Invisibly, a named character vector of file paths written.

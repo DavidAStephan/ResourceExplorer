@@ -5,8 +5,8 @@
 #' forecasts (equal-weighted, inverse-MSE-weighted) and report each
 #' candidate's out-of-sample RMSE in a single tidy diagnostics tibble.
 #'
-#' The "production choice" per commodity is whichever of {best single
-#' spec, equal-weighted combination, inverse-MSE-weighted combination}
+#' The "production choice" per commodity is whichever of \{best single
+#' spec, equal-weighted combination, inverse-MSE-weighted combination\}
 #' has the lowest backtest RMSE. With our sample size (~10 validation
 #' quarters), equal-weighted combinations often beat inverse-MSE
 #' weights -- Stock & Watson (2004) call this the "forecast combination

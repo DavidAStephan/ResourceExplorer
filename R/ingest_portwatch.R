@@ -255,6 +255,9 @@ parse_portwatch_features <- function(json_body) {
 #'   port-day, wide on vessel-type columns).
 #' @param ports_metadata Tibble with `port_name` and `commodity_class`
 #'   columns. Other columns are ignored.
+#' @param ... Swallows legacy positional / named arguments (e.g.
+#'   `lng_ports` from before the 2026-05-20 LNG removal) so external
+#'   callers don't break across the signature change.
 #' @return Long tibble: `obs_date`, `port_id`, `commodity`, `tonnage`,
 #'   `vessel_count`, `ingested_at`.
 #' @export

@@ -17,6 +17,10 @@
 #'
 #' Table names should be short, filesystem-safe snake_case strings, e.g.
 #' `"raw_portwatch_tonnage_daily"`, `"mart_nowcast_history"`.
+#'
+#' @param cfg Config list. Uses `cfg$paths$warehouse_dir`.
+#' @param name Table name (snake_case, no extension).
+#' @param tbl Tibble / data.frame to write.
 #' @name warehouse
 NULL
 

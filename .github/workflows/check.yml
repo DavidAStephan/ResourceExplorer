@@ -1,0 +1,54 @@
+## R CMD check workflow.
+##
+## Gates pull requests + pushes to main on `R CMD check --no-manual`
+## passing under the pinned renv.lock environment. Same R version as the
+## weekly pipeline (4.4). Test suite + package-level checks run together.
+
+name: R CMD check
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.4"
+          use-public-rspm: true
+
+      - name: Restore R packages from renv.lock
+        uses: r-lib/actions/setup-renv@v2
+
+      - name: Install rcmdcheck
+        run: |
+          Rscript -e 'if (!requireNamespace("rcmdcheck", quietly = TRUE)) install.packages("rcmdcheck", repos = "https://cloud.r-project.org")'
+
+      - name: R CMD check
+        env:
+          _R_CHECK_CRAN_INCOMING_: false
+          _R_CHECK_FORCE_SUGGESTS_: false
+        run: |
+          Rscript -e 'rcmdcheck::rcmdcheck(args = c("--no-manual", "--as-cran"), error_on = "error", check_dir = "check")'
+
+      - name: Upload check artefacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rcmdcheck-${{ github.run_id }}
+          path: check/
+          retention-days: 14
