@@ -85,7 +85,7 @@ test_that("run_nowcast returns one row per commodity with the full schema", {
   expect_named(out, c("commodity", "quarter_end",
                       "point_estimate_Mt",
                       "lower_80", "upper_80", "lower_95", "upper_95",
-                      "share_observed", "run_timestamp"))
+                      "share_observed", "run_timestamp", "horizon"))
 })
 
 test_that("empty fit list returns NA nowcasts per commodity", {

@@ -33,7 +33,7 @@
 #' @param cfg Config list.
 #' @return Tibble keyed by `(commodity, quarter_end)`.
 #' @export
-build_features <- function(portwatch, disr_req, cfg) {
+build_features <- function(portwatch, disr_req, cfg, wb_prices = NULL) {
   commodities <- cfg$commodities
 
   # PortWatch can't disaggregate dry-bulk at coal ports into metallurgical
@@ -44,6 +44,18 @@ build_features <- function(portwatch, disr_req, cfg) {
   portwatch <- expand_coal_split(portwatch, commodities)
 
   tonnage_m <- aggregate_monthly_tonnage_mwq(portwatch, commodities)
+
+  # Optional price column. Joined onto features below; absent when
+  # `wb_prices` is NULL or when the commodity has no matching price
+  # series (e.g. an older config without the price ingest wired up).
+  price_join <- if (!is.null(wb_prices) && nrow(wb_prices) > 0) {
+    wb_prices |>
+      dplyr::select(dplyr::all_of(c("commodity", "quarter_end", "log_price")))
+  } else {
+    tibble::tibble(commodity = character(),
+                   quarter_end = as.Date(character()),
+                   log_price = double())
+  }
 
   # LHS: physical tonnage (Mt) by commodity, quarterly.
   lhs <- disr_req |>
@@ -66,7 +78,11 @@ build_features <- function(portwatch, disr_req, cfg) {
     if (!col %in% names(wide)) wide[[col]] <- 0
   }
 
-  feats <- dplyr::inner_join(lhs, wide, by = c("commodity", "quarter_end"))
+  feats <- dplyr::inner_join(lhs, wide, by = c("commodity", "quarter_end")) |>
+    dplyr::left_join(price_join, by = c("commodity", "quarter_end"))
+  # Ensure log_price always exists so the downstream mutate doesn't fail
+  # when price_join had zero matching rows (e.g. price ingest disabled).
+  if (!"log_price" %in% names(feats)) feats$log_price <- NA_real_
 
   feats |>
     dplyr::group_by(.data$commodity) |>
@@ -101,7 +117,12 @@ build_features <- function(portwatch, disr_req, cfg) {
       yoy_log_tonnage_m2  = .data$log_tonnage_m2 -
                              dplyr::lag(.data$log_tonnage_m2, 4L),
       yoy_log_tonnage_m3  = .data$log_tonnage_m3 -
-                             dplyr::lag(.data$log_tonnage_m3, 4L)
+                             dplyr::lag(.data$log_tonnage_m3, 4L),
+      # YoY change in log price, used by the `price_aug` candidate spec.
+      # `log_price` may be NA if the price-ingest hasn't run yet --
+      # the column propagates NAs through to the bridge, which then
+      # skips this candidate via the existing complete_cases guard.
+      yoy_log_price       = .data$log_price - dplyr::lag(.data$log_price, 4L)
     ) |>
     dplyr::ungroup() |>
     dplyr::filter(is.finite(.data$log_volume))

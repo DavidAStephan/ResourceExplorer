@@ -108,10 +108,20 @@ wow_delta <- function(nc_row, history) {
   )
 }
 
-cards_html <- if (nrow(nc) > 0) {
-  cards <- vapply(seq_len(nrow(nc)), function(i) {
-    r <- nc[i, ]
-    d <- wow_delta(r, history)
+# Cards show the current quarter (h = 0). When a Q+1 row exists for the
+# same commodity, append its point estimate + Mt sub-line so the
+# next-quarter outlook is visible without leaving the home page.
+if (!"horizon" %in% names(nc)) nc$horizon <- 0L
+nc_now <- dplyr::filter(nc, horizon == 0L)
+nc_fwd <- dplyr::filter(nc, horizon == 1L)
+history_h0 <- if (!is.null(history) && nrow(history) > 0 && "horizon" %in% names(history)) {
+  dplyr::filter(history, horizon == 0L)
+} else history
+
+cards_html <- if (nrow(nc_now) > 0) {
+  cards <- vapply(seq_len(nrow(nc_now)), function(i) {
+    r <- nc_now[i, ]
+    d <- wow_delta(r, history_h0)
     delta_class <- if (is.na(d$d_mt))       "flat"
                    else if (d$d_mt >  0.05) "up"
                    else if (d$d_mt < -0.05) "down"
@@ -126,13 +136,20 @@ cards_html <- if (nrow(nc) > 0) {
       sprintf("%s%.1f Mt &middot; %s%.1f%% vs %s",
               sign_lbl, abs(d$d_mt), sign_pct, abs(d$d_pct), hours_lbl)
     }
+    fwd_row <- dplyr::filter(nc_fwd, commodity == r$commodity)
+    fwd_html <- if (nrow(fwd_row) == 1) {
+      sprintf('<span class="ci" style="opacity:.7">Next quarter (%s): %.1f Mt &middot; 80%% CI %.1f &ndash; %.1f</span>',
+              format(as.Date(fwd_row$quarter_end), "%b %Y"),
+              fwd_row$point_estimate_Mt, fwd_row$lower_80, fwd_row$upper_80)
+    } else ""
     sprintf(
-      '<div class="headline-card"><span class="label">%s &middot; %s</span><div class="value-row"><span class="value">%.1f</span><span class="unit">Mt</span></div><span class="ci">80%% CI &middot; %.1f &ndash; %.1f Mt</span><span class="delta %s">%s</span><span class="ci" style="opacity:.7">%.0f%% of the quarter observed</span></div>',
+      '<div class="headline-card"><span class="label">%s &middot; %s</span><div class="value-row"><span class="value">%.1f</span><span class="unit">Mt</span></div><span class="ci">80%% CI &middot; %.1f &ndash; %.1f Mt</span><span class="delta %s">%s</span><span class="ci" style="opacity:.7">%.0f%% of the quarter observed</span>%s</div>',
       escape_html(commodity_label(r$commodity)),
       format(as.Date(r$quarter_end), "%b %Y"),
       r$point_estimate_Mt, r$lower_80, r$upper_80,
       delta_class, delta_text,
-      100 * r$share_observed
+      100 * r$share_observed,
+      fwd_html
     )
   }, character(1))
   paste0('<div class="headline-grid">\n', paste(cards, collapse = "\n"),
@@ -224,6 +241,60 @@ history_html <- if (length(hist_files) > 0) {
 } else {
   "<p>No prior reports yet.</p>"
 }
+
+# ---- outputs.json (programmatic feed) -----------------------------------
+#
+# Compact JSON summary so other systems / dashboards / scripts can
+# consume the nowcast without parsing CSVs. Stable schema, versioned via
+# `schema` field so consumers can guard against future shape changes.
+production_picks <- if (nrow(bd) > 0 && "production_choice" %in% names(bd)) {
+  bd |>
+    mutate(production_choice = as.character(production_choice)) |>
+    filter(production_choice %in% c("TRUE", "true"))
+} else tibble::tibble()
+oj_row <- function(r) {
+  pp <- dplyr::filter(production_picks, commodity == r$commodity)
+  list(
+    point_mt        = unname(r$point_estimate_Mt),
+    lower_80        = unname(r$lower_80),
+    upper_80        = unname(r$upper_80),
+    lower_95        = unname(r$lower_95),
+    upper_95        = unname(r$upper_95),
+    share_observed  = unname(r$share_observed),
+    production_spec = if (nrow(pp) == 1L) pp$spec[1] else NA_character_,
+    rmse_vs_naive   = if (nrow(pp) == 1L) round(as.numeric(pp$ratio_vs_naive[1]), 3) else NA_real_
+  )
+}
+horizons_json <- list()
+if (nrow(nc_now) > 0) {
+  horizons_json$current <- list(
+    quarter_end = format(as.Date(nc_now$quarter_end[1]), "%Y-%m-%d"),
+    commodities = stats::setNames(
+      lapply(seq_len(nrow(nc_now)), function(i) oj_row(nc_now[i, ])),
+      nc_now$commodity
+    )
+  )
+}
+if (nrow(nc_fwd) > 0) {
+  horizons_json$next_quarter <- list(
+    quarter_end = format(as.Date(nc_fwd$quarter_end[1]), "%Y-%m-%d"),
+    commodities = stats::setNames(
+      lapply(seq_len(nrow(nc_fwd)), function(i) oj_row(nc_fwd[i, ])),
+      nc_fwd$commodity
+    )
+  )
+}
+outputs_json <- list(
+  schema      = "resourcetracker.outputs.v1",
+  generated_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+  run_timestamp = if (nrow(nc) > 0) format(as.POSIXct(nc$run_timestamp[1]),
+                                            "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+                   else NA_character_,
+  horizons    = horizons_json
+)
+writeLines(jsonlite::toJSON(outputs_json, auto_unbox = TRUE, pretty = TRUE,
+                             na = "null"),
+           path(site_dir, "data", "outputs.json"))
 
 # ---- CSV downloads ----
 csv_list_html <- if (length(csv_files) > 0) {

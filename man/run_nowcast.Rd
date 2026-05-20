@@ -10,7 +10,8 @@ run_nowcast(
   cfg,
   portwatch = NULL,
   ports_meta = NULL,
-  as_of = Sys.Date()
+  as_of = Sys.Date(),
+  horizon = 0L
 )
 }
 \arguments{

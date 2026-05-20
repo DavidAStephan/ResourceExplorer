@@ -69,7 +69,7 @@ list(
     #   midas     -- three free monthly betas, free beta_lag4
     #   bojo      -- pure YoY-on-YoY (beta_lag4 forced to 1)
     #   lagged    -- aggregate + 1-quarter-lagged tonnage term
-    candidates = c("aggregate", "midas", "bojo", "lagged")
+    candidates = c("aggregate", "midas", "bojo", "lagged", "price_aug")
   ),
 
   logging = list(

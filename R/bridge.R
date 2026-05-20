@@ -92,6 +92,12 @@ fit_bridge_one <- function(features, cfg, com, spec,
   }
 
   required_cols <- c(info$lhs, info$rhs, info$predict_extra)
+  missing_cols  <- setdiff(required_cols, names(features))
+  if (length(missing_cols) > 0L) {
+    log_warn("fit_bridge[%s/%s]: missing feature column(s) %s -- skipping",
+             com, spec, paste(missing_cols, collapse = ", "))
+    return(NULL)
+  }
   dat <- features |>
     dplyr::filter(.data$commodity == com,
                   .data$quarter_end <= train_end) |>
@@ -186,6 +192,17 @@ spec_info <- function(spec) {
       # AIS leads customs-cleared trade by several weeks.
       lhs = "log_volume",
       rhs = c("yoy_log_tonnage", "yoy_log_tonnage_lag1", "log_volume_lag4"),
+      predict_extra = character(),
+      to_log_volume = function(yhat, pred_row) yhat
+    ),
+    price_aug = list(
+      # Aggregate spec augmented with a YoY commodity-price term from
+      # the World Bank Pink Sheet. Iron-ore CFR-spot and Newcastle
+      # thermal coal as the price benchmarks. Tests whether price
+      # information adds anything beyond what PortWatch tonnage
+      # already implies about export volumes.
+      lhs = "log_volume",
+      rhs = c("yoy_log_tonnage", "yoy_log_price", "log_volume_lag4"),
       predict_extra = character(),
       to_log_volume = function(yhat, pred_row) yhat
     ),

@@ -1,94 +1,70 @@
 # Roadmap
 
-Living document of follow-up work, ordered by ROI. Tiers 1, 2, and 3
-from the 2026-05-20 review have shipped (see commit history + the
-Completed section at the bottom). Tier 4 is open — pick what's
-interesting.
+Living document of follow-up work, ordered by ROI. Tiers 1, 2, 3, and 4
+from the 2026-05 review have all landed (see commit history + the
+Completed section). Open items below are the next layer down — things
+that would extend the system but aren't on the immediate path.
 
-## Tier 4 — bigger / more interesting
+## Open / future
 
-Ordered by potential headline impact.
+### Deeper external demand signal
 
-### External demand signal (highest expected payoff)
+Tier 4 #1 shipped a World-Bank Pink Sheet price ingest + `price_aug`
+candidate spec on 2026-05-21; the bench evaluated it at the next
+weekly run. Result: price didn't beat tonnage-only specs for any
+commodity (price_aug RMSE worse than `bojo` / `midas` / `aggregate`
+across iron-ore, coal_met, coal_thermal). The framework still keeps it
+in the bench so future shifts in the relationship are picked up
+automatically.
 
-Forecast-combination gains are largest when candidate models use
-*different information*. Our current bench has three candidates all
-driven by the same PortWatch tonnage signal — averaging them just
-denoises within the same information set. A genuinely external demand
-indicator would diversify and start delivering Stock-Watson gains.
+What would actually move the needle is a *demand* indicator (not a
+price), which is harder to ingest:
 
-Candidates worth piloting:
+- **China crude steel production** (monthly, NBS-published, ~3-week
+  lag). Direct iron-ore demand. No clean free API; would need
+  scraping or a paid API.
+- **China power generation** (monthly, NBS). Thermal coal demand.
+  Same access constraint.
+- **Baltic Dry Index** (daily). Dry-bulk shipping freight rate — a
+  near-real-time market gauge of bulk demand. No public API; the
+  data is paywalled.
 
-- **China crude steel production** (monthly, lagged ~3 weeks): the
-  dominant iron-ore demand signal. Available via NBS / S&P Platts.
-- **Baltic Dry Index** (daily, real-time): a price-side indicator for
-  bulk-carrier demand. Especially useful when shipping freight is
-  pricing in commodity-demand shifts ahead of physical flow.
-- **China power generation index** (monthly): the dominant thermal coal
-  demand signal.
+Effort to add any one: ~1 day for ingestion (the slot in the bridge
+bench already exists). Adding all three: ~3 days. Worth doing only
+when there's a budget for a data subscription or someone wants to
+maintain a scraper.
 
-Architecture: new candidate spec slots into `cfg$bridge$candidates`,
-no other plumbing changes. The existing bench + combination + production
-selection handles the rest.
+### LNG re-scope — final note
 
-Effort: ~1 day per indicator (new ingest source, spec wiring,
-backtest, deployment). Recommend piloting one (China steel for iron-
-ore) before adding more.
+This is **deferred indefinitely**, not just unstarted.
 
-### LNG re-scope
+The original 2026-04-21 finding stands: PortWatch tanker-tonnage at
+LNG ports has near-zero correlation with ABS LNG export volumes at
+quarterly grain. Australian LNG is contract-dominated — vessels arrive
+on schedule regardless of spot-price dynamics, so tonnage is an output
+of contracts rather than an indicator of them.
 
-Currently dropped (2026-04-21) because PortWatch tanker tonnage has
-near-zero correlation with ABS LNG volumes at quarterly grain.
-Australian LNG is contract-dominated — vessels arrive on schedule
-regardless of spot-price dynamics, so tonnage is an output of contracts
-rather than an indicator of them.
+The plausible workaround would model LNG via AIS *destination-share*
+(% of tanker tonnage routed to Japan / Korea / China each quarter),
+since destinations encode the contract structure implicitly. But:
 
-But: AIS *destinations* encode the contract structure implicitly. A
-spec that models LNG via destination-share (% of tanker tonnage to
-Japan / Korea / China each quarter) might pick up signal the
-aggregate-tonnage version missed.
+1. The IMF PortWatch FeatureServer we consume **doesn't expose
+   destination at the daily-tonnage layer** — it gives port-day
+   tonnage broken out by vessel type, without per-voyage routing.
+2. To get destinations we'd need a different AIS data source
+   (commercial — VesselFinder, Spire, Kpler, MarineTraffic), and that
+   adds a paywalled dependency the project has deliberately avoided.
 
-Effort: ~2 days research. Could quickly turn into a multi-week project
-if destinations require their own data-cleaning step.
+So LNG is not addressable within the current "free public data only"
+constraint. If the constraint relaxes, the work is roughly:
 
-### One-quarter-ahead forecast
+- New ingest pulling per-vessel destination data
+- Quarterly destination-share derivation per Australian LNG port
+- New `lng_destshare` candidate spec
+- ~2-3 weeks of dev + validation, not days
 
-The bridge regressions support multi-step forecasts without
-recursion: Q+1's `log_volume_lag4` is Q-3's *observed* volume, which is
-always known. Currently we only publish the current-quarter nowcast;
-could also publish a next-quarter forecast.
-
-Practical question: how informative is the Q+1 forecast vs. just
-extrapolating the seasonal pattern? Easy backtest answer.
-
-Effort: ~half day. Add a Q+1 column to the headline cards if it has
-skill; drop if it's no better than the naive Q+1 = Q-3 seasonal.
-
-### `outputs.json` endpoint
-
-Currently consumers must parse the CSVs. A tiny JSON endpoint at the
-deployed Pages site (`/outputs.json`) would let other dashboards / Slack
-bots / personal scripts consume the nowcast programmatically.
-
-Schema (suggested):
-```json
-{
-  "as_of": "2026-05-20",
-  "quarter_end": "2026-06-30",
-  "share_observed": 0.54,
-  "commodities": {
-    "iron_ore": {"point_mt": 234.9, "lower_80": 231.2, "upper_80": 237.9,
-                 "production_spec": "bojo", "rmse_vs_naive": 0.78},
-    "coal":     {"point_mt": 87.9,  "lower_80": 86.5,  "upper_80": 89.9,
-                 "production_spec": "aggregate", "rmse_vs_naive": 0.50}
-  }
-}
-```
-
-Add the JSON emission to `scripts/build_index.R` (it already has all
-the source data in scope).
-
-Effort: ~30 minutes.
+Until then, the iron-ore + coal_met + coal_thermal panel is the live
+scope.
 
 ## Anti-list — things I'd recommend NOT doing
 
@@ -152,3 +128,25 @@ adding a one-liner to the relevant commit message.
     about `ggplot2` / `stringr` being declared Imports but consumed via
     the briefing's separate rmarkdown render env (real runtime deps,
     just not visible to the checker).
+
+- **Tier 4 extensions** (PR #19, #20, #21):
+  - **Q+1 forecast**: `run_nowcast` takes a `horizon = c(0L, 1L)` arg;
+    Q+1 row produced for each commodity using the seasonal-pace future-
+    months extrapolation. Surfaced as a "Next-quarter outlook" section
+    in the briefing + sub-line on each landing-card.
+  - **`outputs.json` endpoint** at `/data/outputs.json`. Compact
+    schema-versioned JSON summary for programmatic consumers: point +
+    80/95 bands per (commodity × horizon), plus production spec and
+    RMSE-vs-naive per pick.
+  - **World Bank Pink Sheet ingestion + `price_aug` candidate spec**.
+    Pulls the monthly Pink Sheet xlsx (no API key), aggregates to
+    quarterly average, plumbs `yoy_log_price` through the feature
+    panel, adds `price_aug` to `cfg$bridge$candidates`. The bench
+    evaluated it against the existing candidates; price didn't win
+    production for any commodity (iron_ore/price_aug RMSE 4.86 vs
+    bojo 4.51; coal_met/price_aug 1.79 vs midas 1.10;
+    coal_thermal/price_aug 3.03 vs bojo 2.21). Kept in the bench so
+    the OOS leaderboard flags if/when the relationship shifts.
+  - **LNG re-scope**: not shipped — final analysis in the body of this
+    doc. Blocker is concrete (we don't have AIS destination data in
+    the public PortWatch slice).
