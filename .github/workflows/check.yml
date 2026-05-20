@@ -31,6 +31,8 @@ jobs:
           r-version: "4.4"
           use-public-rspm: true
 
+      - uses: r-lib/actions/setup-pandoc@v2
+
       - name: Restore R packages from renv.lock
         uses: r-lib/actions/setup-renv@v2
 
