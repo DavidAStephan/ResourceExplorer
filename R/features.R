@@ -36,6 +36,13 @@
 build_features <- function(portwatch, disr_req, cfg) {
   commodities <- cfg$commodities
 
+  # PortWatch can't disaggregate dry-bulk at coal ports into metallurgical
+  # vs thermal use -- the disaggregation only exists on the LHS (DISR
+  # rows 47 vs 48). When the configured commodities include the coal
+  # split, fan out PortWatch's `coal` rows so both sub-commodities see
+  # the same tonnage signal.
+  portwatch <- expand_coal_split(portwatch, commodities)
+
   tonnage_m <- aggregate_monthly_tonnage_mwq(portwatch, commodities)
 
   # LHS: physical tonnage (Mt) by commodity, quarterly.
@@ -82,6 +89,12 @@ build_features <- function(portwatch, disr_req, cfg) {
       # `spec = "aggregate"` bridge variant.
       yoy_log_tonnage     = .data$log_tonnage -
                              dplyr::lag(.data$log_tonnage, 4L),
+      # 1-quarter lag of the YoY tonnage indicator, used by the `lagged`
+      # spec (Adland-Jia-Strandenes 2017: AIS can lead customs-cleared
+      # trade by several weeks).
+      yoy_log_tonnage_lag1 = dplyr::lag(.data$log_tonnage -
+                                          dplyr::lag(.data$log_tonnage, 4L),
+                                        1L),
       # Per-month YoY: for the `spec = "midas"` bridge variant.
       yoy_log_tonnage_m1  = .data$log_tonnage_m1 -
                              dplyr::lag(.data$log_tonnage_m1, 4L),
@@ -92,6 +105,35 @@ build_features <- function(portwatch, disr_req, cfg) {
     ) |>
     dplyr::ungroup() |>
     dplyr::filter(is.finite(.data$log_volume))
+}
+
+#' Duplicate PortWatch `coal` rows into `coal_met` + `coal_thermal`
+#'
+#' Both sub-commodities share the same PortWatch signal because we can't
+#' disaggregate dry-bulk-at-coal-ports by met vs thermal use at the port
+#' level. The disaggregation only exists on the LHS (DISR rows 47 vs 48).
+#'
+#' If `commodities` doesn't include any coal-split entries the function
+#' is a no-op.
+#'
+#' @keywords internal
+expand_coal_split <- function(portwatch, commodities) {
+  wants_split <- any(c("coal_met", "coal_thermal") %in% commodities)
+  if (!wants_split || nrow(portwatch) == 0L) return(portwatch)
+  if (!"coal" %in% portwatch$commodity) return(portwatch)
+
+  coal_rows <- dplyr::filter(portwatch, .data$commodity == "coal")
+  add <- list()
+  if ("coal_met"     %in% commodities) {
+    add[[1L]] <- dplyr::mutate(coal_rows, commodity = "coal_met")
+  }
+  if ("coal_thermal" %in% commodities) {
+    add[[length(add) + 1L]] <- dplyr::mutate(coal_rows, commodity = "coal_thermal")
+  }
+  dplyr::bind_rows(
+    dplyr::filter(portwatch, .data$commodity != "coal"),
+    dplyr::bind_rows(add)
+  )
 }
 
 #' Aggregate daily PortWatch tonnage to (commodity × quarter × month-in-quarter)

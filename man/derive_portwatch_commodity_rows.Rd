@@ -4,7 +4,7 @@
 \alias{derive_portwatch_commodity_rows}
 \title{Derive one row per (obs_date, port, commodity) from the wide schema.}
 \usage{
-derive_portwatch_commodity_rows(wide, ports_metadata, lng_ports = character(0))
+derive_portwatch_commodity_rows(wide, ports_metadata, ...)
 }
 \arguments{
 \item{wide}{Tibble from \code{\link[=parse_portwatch_features]{parse_portwatch_features()}} (one row per
@@ -12,10 +12,6 @@ port-day, wide on vessel-type columns).}
 
 \item{ports_metadata}{Tibble with \code{port_name} and \code{commodity_class}
 columns. Other columns are ignored.}
-
-\item{lng_ports}{Character vector of \code{portname} strings that are
-genuine LNG export facilities. Tanker tonnage at these ports is
-routed to \code{lng}; tanker tonnage anywhere else is dropped.}
 }
 \value{
 Long tibble: \code{obs_date}, \code{port_id}, \code{commodity}, \code{tonnage},
@@ -26,16 +22,13 @@ Long tibble: \code{obs_date}, \code{port_id}, \code{commodity}, \code{tonnage},
 }
 \details{
 \itemize{
-\item \code{export_tanker} \strong{at a port in \code{lng_ports}} -> \code{lng}. Other tanker
-tonnage (refined petroleum, bunkers, LPG) is dropped; a port-level
-investigation on 2026-04-21 showed non-LNG tanker activity was
-contaminating and dragging the aggregate — the real LNG ports
-(Dampier, Gladstone, Darwin, Gorgon LNG, Onslow) are stable to
-growing. The whitelist comes from \code{cfg$portwatch$lng_ports}.
 \item \code{export_dry_bulk} at an iron-ore-class port -> \code{iron_ore}.
 \item \code{export_dry_bulk} at a coal-class port -> \code{coal}.
-\item All other vessel types and all other tanker -> dropped (no "other"
-bucket in the current per-commodity-volume spec).
+\item Tanker tonnage and all other vessel types -> dropped. LNG was
+scoped out 2026-04-21 (PortWatch tanker tonnage has near-zero
+correlation with ABS LNG volumes — Australian LNG is contract-
+dominated, not vessel-call-dominated). Iron-ore + coal are the
+only commodities the bridge consumes.
 }
 
 Port commodity classes come from \code{inst/extdata/ports_metadata.csv}

@@ -23,7 +23,13 @@ list(
     valid_start = as.Date("2024-01-01")
   ),
 
-  commodities = c("iron_ore", "coal"),
+  # Coal is split into metallurgical (DISR row 47) and thermal (row 48).
+  # Different demand drivers (Asian steelmakers vs power generation) and
+  # the 2026-05-20 review flagged the split as the most likely RMSE
+  # improvement. Both sub-commodities share the same PortWatch RHS
+  # (we can't disaggregate dry-bulk tonnage by destination use at port
+  # level) but get separately-fit bridges.
+  commodities = c("iron_ore", "coal_met", "coal_thermal"),
 
   cache = list(enabled = TRUE),
 
@@ -36,15 +42,16 @@ list(
 
   disr = list(
     # Sheet name and row mapping in DISR REQ Historical Data workbook.
-    # Iron ore row 19 is in kt; coal rows 47+48 (metallurgical + thermal)
-    # are in Mt. The url_override key forces a specific release (useful
-    # for testing / reproducibility); when NULL the code probes for the
-    # latest publication.
+    # Iron ore row 19 is in kt; coal split: row 47 = metallurgical,
+    # row 48 = thermal, both in Mt. The url_override key forces a
+    # specific release (useful for testing / reproducibility); when
+    # NULL the code probes for the latest publication.
     sheet        = "16",
     url_override = NULL,
     rows = list(
-      iron_ore = list(rows = 19L,          unit = "kt"),
-      coal     = list(rows = c(47L, 48L),  unit = "Mt")
+      iron_ore     = list(rows = 19L, unit = "kt"),
+      coal_met     = list(rows = 47L, unit = "Mt"),
+      coal_thermal = list(rows = 48L, unit = "Mt")
     )
   ),
 
@@ -56,19 +63,13 @@ list(
   bridge = list(
     hac_lag = 1L,
     min_n   = 12L,
-    # Per-commodity model spec. "aggregate" uses a single YoY-Δ tonnage
-    # predictor (parsimonious, better when monthly betas would be
-    # roughly equal); "midas" uses three per-month YoY-Δ predictors
-    # (flexible, better when within-quarter timing carries signal).
-    #
-    # Choices come from the 2026-04-21 backtest-RMSE comparison:
-    # iron_ore improves ~5% under MIDAS (β_m1 dominates) while coal is
-    # ~16% worse because its monthly betas are roughly equal, so the
-    # extra parameters inflate variance without new signal.
-    spec = list(
-      iron_ore = "midas",
-      coal     = "aggregate"
-    )
+    # All candidates are fit per commodity at every refit; production
+    # picks the best by OOS RMSE (see R/combination.R). Currently:
+    #   aggregate -- free beta_lag4
+    #   midas     -- three free monthly betas, free beta_lag4
+    #   bojo      -- pure YoY-on-YoY (beta_lag4 forced to 1)
+    #   lagged    -- aggregate + 1-quarter-lagged tonnage term
+    candidates = c("aggregate", "midas", "bojo", "lagged")
   ),
 
   logging = list(

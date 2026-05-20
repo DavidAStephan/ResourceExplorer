@@ -218,8 +218,18 @@ build_nowcast_pred_frame <- function(features, portwatch, cfg, as_of, fits) {
                      log_tonnage_m2_lag4 = .data$log_tonnage_m2,
                      log_tonnage_m3_lag4 = .data$log_tonnage_m3)
 
+  # The `lagged` spec wants Δ_4 log T from the *prior* quarter as a
+  # regressor. The prior quarter is fully observed by now (it's already
+  # in `features`), so we just look it up.
+  q_prev <- lubridate::floor_date(q_end, "quarter") - 1
+  prev <- features |>
+    dplyr::filter(.data$quarter_end == q_prev) |>
+    dplyr::transmute(.data$commodity,
+                     yoy_log_tonnage_lag1 = .data$yoy_log_tonnage)
+
   wide_mwq |>
     dplyr::left_join(lag4,         by = "commodity") |>
+    dplyr::left_join(prev,         by = "commodity") |>
     dplyr::left_join(share_by_com, by = "commodity") |>
     dplyr::mutate(
       quarter_end        = q_end,
@@ -240,6 +250,7 @@ build_nowcast_pred_frame <- function(features, portwatch, cfg, as_of, fits) {
       "log_tonnage", "log_tonnage_m1", "log_tonnage_m2", "log_tonnage_m3",
       "yoy_log_tonnage",
       "yoy_log_tonnage_m1", "yoy_log_tonnage_m2", "yoy_log_tonnage_m3",
+      "yoy_log_tonnage_lag1",
       "log_volume_lag4"
     )))
 }

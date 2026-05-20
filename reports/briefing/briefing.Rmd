@@ -63,8 +63,14 @@ theme_rt <- function(base_size = 11) {
     )
 }
 theme_set(theme_rt())
-.commodity_colours <- c(iron_ore = .palette$accent,
-                         coal     = .palette$accent2)
+.commodity_colours <- c(iron_ore     = .palette$accent,
+                         coal         = .palette$accent2,
+                         coal_met     = .palette$accent2,
+                         coal_thermal = "#3F8A6A")    # muted teal-green
+.commodity_labels  <- c(iron_ore     = "Iron ore",
+                         coal         = "Coal",
+                         coal_met     = "Metallurgical coal",
+                         coal_thermal = "Thermal coal")
 
 outputs <- params$outputs_dir
 wh_dir  <- params$warehouse_dir
@@ -85,7 +91,7 @@ diag_fit <- safe_read_csv(path(outputs, "bridge_diagnostics.csv"))
 history  <- safe_read_wh("mart_nowcast_history")
 disr     <- safe_read_wh("raw_disr_req_quarterly")
 
-com_levels <- c("iron_ore", "coal")
+com_levels <- c("iron_ore", "coal_met", "coal_thermal", "coal")
 
 # For each commodity in `nowcast`, find the most-recent prior row in
 # `history` for the same quarter that isn't this run, and compute the
@@ -139,8 +145,10 @@ delta <- compute_wow_delta(nowcast, history)
 ```{r top-line, results='asis'}
 commodity_label <- function(x) {
   switch(x,
-         iron_ore = "Iron ore",
-         coal     = "Coal",
+         iron_ore     = "Iron ore",
+         coal         = "Coal",
+         coal_met     = "Metallurgical coal",
+         coal_thermal = "Thermal coal",
          tools::toTitleCase(gsub("_", " ", x)))
 }
 
@@ -225,8 +233,7 @@ if (nrow(disr) > 0 && nrow(nowcast) > 0) {
                aes(quarter_end, point_estimate_Mt),
                colour = .palette$accent, size = 3.4) +
     facet_wrap(~ commodity, scales = "free_y",
-               labeller = labeller(commodity = c(iron_ore = "Iron ore",
-                                                  coal     = "Coal"))) +
+               labeller = labeller(commodity = .commodity_labels)) +
     labs(x = NULL, y = "Quarterly exports (Mt)",
          title = "DISR quarterly export volume, with current-quarter nowcast",
          subtitle = "Grey: published DISR Resources & Energy Quarterly Table 16 actuals. Blue: current-quarter nowcast with 80% (dark) and 95% (light) intervals.")
@@ -250,6 +257,8 @@ if (nrow(diag_fit) > 0) {
                               sprintf("%.3f", beta_lag4)),
       lag4_eq_1_pval = ifelse(is.na(beta_lag4_eq_1_pval), "",
                               sprintf("%.3f", beta_lag4_eq_1_pval)),
+      chow_pval_fmt  = ifelse(is.na(chow_pval), "",
+                              sprintf("%.2f", chow_pval)),
       r2_train       = ifelse(is.na(r_squared), "",
                               sprintf("%.2f", r_squared)),
       r2_oos         = ifelse(is.na(r_squared_oos), "",
@@ -266,6 +275,7 @@ if (nrow(diag_fit) > 0) {
            `β_T (se)` = beta_tonnage,
            `β_lag4` = beta_lag4,
            `p(β_lag4=1)` = lag4_eq_1_pval,
+           `p(Chow)` = chow_pval_fmt,
            rmse_valid,
            `RMSE/naive` = ratio_vs_naive) |>
     knitr::kable(
@@ -276,6 +286,9 @@ if (nrow(diag_fit) > 0) {
         "`p(β_lag4=1)` is the Wald-test p-value for the YoY-on-YoY",
         "restriction (NA for `bojo`, which imposes it; `equal_avg` and",
         "`inv_mse` are combination forecasts and have no in-sample β).",
+        "`p(Chow)` tests for a structural break at the midpoint of the",
+        "training sample; values < 0.05 suggest the AIS↔DISR relationship",
+        "shifted within the fit window.",
         "`RMSE/naive` < 1 means the spec beats the seasonal random walk."
       )
     )
@@ -343,8 +356,7 @@ if (nrow(tonnage) > 0) {
   p +
     scale_colour_manual(values = .commodity_colours) +
     facet_wrap(~ commodity, scales = "free_y",
-               labeller = labeller(commodity = c(iron_ore = "Iron ore",
-                                                  coal     = "Coal"))) +
+               labeller = labeller(commodity = .commodity_labels)) +
     labs(x = NULL, y = "Quarterly PortWatch tonnage (Mt)",
          title = "PortWatch quarterly tonnage by commodity",
          caption = paste(
@@ -441,6 +453,14 @@ build_eq_entry <- function(com) {
         co[["(Intercept)"]],
         fmt_signed(co[["yoy_log_tonnage"]], 3)
       )
+    } else if (spec == "lagged") {
+      eq <- sprintf(
+        "\\log V_{Q} \\;=\\; %.3f \\;%s \\,\\Delta_{4}\\log T_{Q} \\;%s \\,\\Delta_{4}\\log T_{Q-1} \\;%s \\,\\log V_{Q-4} \\;+\\; \\varepsilon_{Q}",
+        co[["(Intercept)"]],
+        fmt_signed(co[["yoy_log_tonnage"]], 3),
+        fmt_signed(co[["yoy_log_tonnage_lag1"]], 3),
+        fmt_signed(co[["log_volume_lag4"]], 3)
+      )
     } else {
       eq <- ""
     }
@@ -482,13 +502,14 @@ build_eq_entry <- function(com) {
   list(spec = spec, eq = eq, rationale = rationale)
 }
 
-iron_eq <- build_eq_entry("iron_ore")
-coal_eq <- build_eq_entry("coal")
+prod_entries <- lapply(unique(nowcast$commodity), function(com) {
+  list(com = com, entry = build_eq_entry(com))
+})
 ```
 
 ### Production equation per commodity
 
-These are the actual equations driving the headline nowcast above. They're picked per commodity by walk-forward backtest RMSE from a bench of `{aggregate, midas, bojo, equal_avg, inv_mse}` specs.
+These are the actual equations driving the headline nowcast above. One per commodity, picked by walk-forward backtest RMSE from a bench of `{aggregate, midas, bojo, lagged, equal_avg, inv_mse}` specs.
 
 ```{r prod-equations-show, results='asis'}
 emit <- function(label, entry) {
@@ -497,8 +518,7 @@ emit <- function(label, entry) {
   cat(sprintf("$$%s$$\n\n", entry$eq))
   cat(entry$rationale, "\n\n")
 }
-emit("Iron ore", iron_eq)
-emit("Coal",     coal_eq)
+for (pe in prod_entries) emit(commodity_label(pe$com), pe$entry)
 ```
 
 ### Conventions
