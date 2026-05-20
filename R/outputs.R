@@ -12,6 +12,10 @@
 #' @param bridge_fits Output of [fit_bridge()].
 #' @param backtest_results Tibble from [backtest_rmse()].
 #' @param cfg Config list.
+#' @param production_label Optional named character vector keyed by
+#'   commodity (e.g. `c(iron_ore = "bojo", coal_met = "midas")`). When
+#'   supplied, the matching `(commodity, spec)` row in
+#'   `bridge_diagnostics.csv` is flagged `production_choice = TRUE`.
 #' @return Invisibly, a named character vector of file paths written.
 #' @export
 write_csv_outputs <- function(nowcast_current, portwatch, bridge_fits,

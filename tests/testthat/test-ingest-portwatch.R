@@ -151,8 +151,15 @@ test_that("fetch_portwatch_tonnage falls back to cache on HTTP failure", {
       warehouse_dir  = file.path(tmp, "warehouse"),
       cache          = file.path(tmp, "cache"),
       logs           = file.path(tmp, "logs"),
-      ports_metadata = testthat::test_path("..", "..", "inst", "extdata",
-                                            "ports_metadata.csv")
+      ports_metadata = local({
+        p <- system.file("extdata", "ports_metadata.csv",
+                         package = "resourcetracker")
+        if (!nzchar(p)) {
+          p <- testthat::test_path("..", "..", "inst", "extdata",
+                                    "ports_metadata.csv")
+        }
+        p
+      })
     ),
     sample = list(train_start = "2019-01-01"),
     portwatch = list(

@@ -12,6 +12,10 @@ port-day, wide on vessel-type columns).}
 
 \item{ports_metadata}{Tibble with \code{port_name} and \code{commodity_class}
 columns. Other columns are ignored.}
+
+\item{...}{Swallows legacy positional / named arguments (e.g.
+\code{lng_ports} from before the 2026-05-20 LNG removal) so external
+callers don't break across the signature change.}
 }
 \value{
 Long tibble: \code{obs_date}, \code{port_id}, \code{commodity}, \code{tonnage},

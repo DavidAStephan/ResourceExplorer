@@ -46,13 +46,8 @@ jobs:
           r-version: "4.4"
           use-public-rspm: true   # Posit Package Manager binaries
 
-      - name: Install R package dependencies (cached binaries)
-        uses: r-lib/actions/setup-r-dependencies@v2
-        with:
-          packages: |
-            local::.
-            any::devtools
-          needs: check
+      - name: Restore R packages from renv.lock
+        uses: r-lib/actions/setup-renv@v2
 
       - name: Restore pipeline state from `data` branch
         env:
@@ -150,6 +145,69 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deploy
         uses: actions/deploy-pages@v5
+
+      # Graduated staleness signal -- run.R writes outputs/staleness.json
+      # listing days-since-last-fresh-fetch per external source. The
+      # pipeline itself doesn't fail when one source is stale (only --ci's
+      # all-stale check does). Surface anything >7 days as a soft issue
+      # so the freshness of the data is auditable; close the issue when
+      # everything's fresh again.
+      - name: Manage stale-source issue
+        if: success()
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs   = require("fs");
+            const path = "outputs/staleness.json";
+            if (!fs.existsSync(path)) {
+              core.info("no staleness.json produced; skipping");
+              return;
+            }
+            const data = JSON.parse(fs.readFileSync(path, "utf8"));
+            const stale = data.sources.filter(s => s.stale);
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: "open", labels: "weekly-stale-source",
+            });
+            if (stale.length > 0) {
+              const lines = stale.map(s => `- \`${s.source}\` last fresh fetch ${s.days_since_ok} days ago (${s.latest_ok})`);
+              const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+              const body = [
+                `One or more external data sources have been silently stale for more than ${data.threshold_days} days.`,
+                ``,
+                `The pipeline is still publishing nowcasts off the stale-cache fallback, but the headline numbers reflect old upstream data. Investigate whether the source API is genuinely down or whether the URL/schema changed.`,
+                ``,
+                ...lines,
+                ``,
+                `Latest run: ${runUrl}`,
+                ``,
+                `This issue auto-closes when all sources are fresh again.`,
+              ].join("\n");
+              if (open.data.length > 0) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  issue_number: open.data[0].number, body,
+                });
+              } else {
+                await github.rest.issues.create({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  title: "[weekly-nowcast] one or more sources are stale",
+                  body, labels: ["weekly-stale-source"],
+                });
+              }
+            } else {
+              for (const issue of open.data) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: `All sources fresh on run ${context.runId}. Auto-closing.`,
+                });
+                await github.rest.issues.update({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  issue_number: issue.number, state: "closed",
+                });
+              }
+            }
 
       - name: Upload run logs
         if: always()

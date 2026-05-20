@@ -1,51 +1,9 @@
 # Roadmap
 
-Living document of follow-up work, ordered by ROI. Tiers 1 and 2 from
-the 2026-05-20 review have shipped (see commit history). Tiers 3 and 4
-are open — pick what's interesting.
-
-## Tier 3 — operational hardening
-
-Worth doing before any production-critical reliance on the weekly cron.
-
-### `renv` lockfile
-
-Currently `r-lib/actions/setup-r-dependencies` resolves to whatever
-versions are current on CRAN at run time. A transient package-side
-change (a `dplyr` API rename, a `httr2` retry-behaviour fix that
-changes our retry semantics) could break the Tuesday run with no
-local-dev warning.
-
-Fix: `renv::init()` in the repo, commit `renv.lock`, change the
-workflow to use `r-lib/actions/setup-renv@v2` instead of
-`setup-r-dependencies@v2`.
-
-Effort: ~1 hour. Adds about 100 KB of lockfile to the repo.
-
-### Graduated staleness warning
-
-`Rscript run.R --ci` currently fails *only* when every external fetch
-landed on stale cache. A more useful signal: open a *soft* "investigate"
-issue when any one source has been stale for >7 days but the run still
-completes. Catches degradation before a hard failure on Tuesday morning.
-
-Implementation: extend the `--ci` block in `run.R` to inspect
-`mart_ingest_runs` rows older than 7 days; if the latest `status` per
-source is `"cached"` or `"error"` and we haven't seen `"ok"` in that
-window, exit code 0 but write a structured `WARN` line that the
-workflow picks up (separate label from `weekly-failure`).
-
-Effort: ~2 hours.
-
-### `R CMD check` in CI
-
-Currently never run in the workflow. A package-level lint (NOTEs,
-WARNINGs from `R CMD check`) might be lurking. Adding a check step
-to the workflow gates regressions.
-
-Pre-req: needs `renv.lock` so the check environment is stable.
-
-Effort: ~1 hour after renv is in.
+Living document of follow-up work, ordered by ROI. Tiers 1, 2, and 3
+from the 2026-05-20 review have shipped (see commit history + the
+Completed section at the bottom). Tier 4 is open — pick what's
+interesting.
 
 ## Tier 4 — bigger / more interesting
 
@@ -159,3 +117,38 @@ items in the future:
 This file is hand-maintained. Mark items as done by moving them under a
 "Completed" section at the bottom with a date, or by deleting them and
 adding a one-liner to the relevant commit message.
+
+## Completed
+
+### 2026-05-20
+
+- **Tier 1 cleanups** (PR #12): tidyselect lint sweep, removed the
+  vestigial LNG ingestion pathway, WoW delta + enriched archive table
+  on the landing page, failure-issue body now includes the log tail.
+- **Tier 2 research** (PR #13): coal split into `coal_met` +
+  `coal_thermal` (separate bridges on shared PortWatch RHS), new
+  `lagged` candidate spec (Adland-Jia-Strandenes 2017), Chow test for
+  structural break at training-sample midpoint. Coal_met turned out to
+  be the most predictable commodity in the panel (RMSE/naive 0.49,
+  MIDAS wins).
+- **run.R force-write bug** (PR #14): `--force` rerun used to recompute
+  in memory but skip the rds write when the file already existed.
+  Surfaced by the coal-split schema change. Fixed by always persisting
+  when a step actually ran.
+
+### 2026-05-21
+
+- **Tier 3 operational hardening** (PR #15):
+  - `renv.lock` committed; workflow restores via
+    `r-lib/actions/setup-renv@v2`. Pipeline runtime + tests + check now
+    pin to a single resolved package set across local and CI.
+  - Graduated staleness signal: `run.R` writes `outputs/staleness.json`
+    with days-since-last-fresh-fetch per source. The workflow opens /
+    closes a soft `weekly-stale-source` issue when any source has been
+    stale for more than 7 days. Independent of the hard `--ci` all-stale
+    failure path.
+  - New `.github/workflows/check.yml`: `R CMD check --no-manual` on PRs
+    and pushes to main. 0 errors, 0 warnings; one informational NOTE
+    about `ggplot2` / `stringr` being declared Imports but consumed via
+    the briefing's separate rmarkdown render env (real runtime deps,
+    just not visible to the checker).

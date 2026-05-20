@@ -168,6 +168,56 @@ if (!SKIP_REPORT) {
 
 log_info("pipeline complete -- %d csv outputs", length(csv_paths))
 
+# --- Per-source staleness snapshot (always written) -----------------------
+#
+# For each external source we track, report the days since its most-
+# recent fresh fetch (`status == "ok"`). Written to outputs/staleness.json
+# so the weekly Actions workflow can surface a graduated warning when a
+# source has been silently rotting on stale cache for more than a week.
+# This is independent of `--ci`; the CI guard is a *hard* fail signal,
+# this is a *soft* notification feed.
+
+local({
+  runs <- tryCatch(wh_read("mart_ingest_runs", cfg), error = function(e) NULL)
+  src_summary <- if (is.null(runs) || nrow(runs) == 0L) {
+    tibble::tibble(source = character(), latest_ok = as.POSIXct(character()),
+                    days_since_ok = double())
+  } else {
+    runs |>
+      dplyr::filter(.data$status == "ok") |>
+      dplyr::group_by(.data$source) |>
+      dplyr::summarise(latest_ok = max(.data$started_at), .groups = "drop") |>
+      dplyr::mutate(days_since_ok = as.numeric(difftime(Sys.time(),
+                                                         .data$latest_ok,
+                                                         units = "days"))) |>
+      dplyr::arrange(.data$source)
+  }
+  src_rows <- lapply(seq_len(nrow(src_summary)), function(i) {
+    r <- src_summary[i, ]
+    list(
+      source        = r$source,
+      latest_ok     = format(r$latest_ok, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+      days_since_ok = round(r$days_since_ok, 1),
+      stale         = isTRUE(r$days_since_ok > 7)
+    )
+  })
+  payload <- list(
+    generated_at   = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+    threshold_days = 7,
+    sources        = src_rows
+  )
+  fs::dir_create(cfg$paths$outputs)
+  writeLines(jsonlite::toJSON(payload, auto_unbox = TRUE, pretty = TRUE),
+             fs::path(cfg$paths$outputs, "staleness.json"))
+  for (i in seq_len(nrow(src_summary))) {
+    r <- src_summary[i, ]
+    if (isTRUE(r$days_since_ok > 7)) {
+      log_warn("staleness: %s last fresh fetch was %.1f days ago",
+               r$source, r$days_since_ok)
+    }
+  }
+})
+
 # --- CI staleness guard ----------------------------------------------------
 #
 # In --ci mode, fail the run if every external fetch this pipeline

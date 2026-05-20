@@ -23,6 +23,12 @@ wh_read(name, cfg)
 wh_append(name, tbl, cfg, keys = NULL)
 }
 \arguments{
+\item{cfg}{Config list. Uses \code{cfg$paths$warehouse_dir}.}
+
+\item{name}{Table name (snake_case, no extension).}
+
+\item{tbl}{Tibble / data.frame to write.}
+
 \item{keys}{Character vector of columns to dedupe on. If \code{NULL}, rows
 are concatenated without dedup.}
 }

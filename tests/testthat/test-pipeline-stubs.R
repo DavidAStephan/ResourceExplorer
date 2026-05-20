@@ -5,8 +5,21 @@ test_that("pipeline runs end-to-end with all caches primed (integration)", {
   cfg <- list(
     paths = list(
       warehouse_dir  = file.path(tmp, "warehouse"),
-      ports_metadata = testthat::test_path("..", "..", "inst", "extdata",
-                                            "ports_metadata.csv"),
+      # `system.file` resolves against the *installed* package so the
+      # test works under both `devtools::test()` (source tree) and
+      # `R CMD check` (installed tarball). The source-tree path is
+      # `inst/extdata/`; the installed path drops the `inst/`.
+      ports_metadata = local({
+        p <- system.file("extdata", "ports_metadata.csv",
+                         package = "resourcetracker")
+        if (!nzchar(p)) {
+          # Fallback for tests run before the package is installed
+          # (devtools::test() before devtools::install()).
+          p <- testthat::test_path("..", "..", "inst", "extdata",
+                                    "ports_metadata.csv")
+        }
+        p
+      }),
       cache          = file.path(tmp, "cache"),
       outputs        = file.path(tmp, "outputs"),
       logs           = file.path(tmp, "logs")
