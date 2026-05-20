@@ -31,10 +31,7 @@ list(
     base_url  = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/ArcGIS/rest/services/Daily_Ports_Data/FeatureServer/0",
     countries = c("AUS"),
     page_size = 1000L,
-    retry     = list(max_attempts = 3L, backoff_seconds = 5L),
-    # LNG port whitelist -- kept in config for completeness even though
-    # lng is out of the nowcasting scope. Tanker tonnage routing.
-    lng_ports = c("Darwin", "Dampier", "Gladstone", "Gorgon LNG", "Onslow")
+    retry     = list(max_attempts = 3L, backoff_seconds = 5L)
   ),
 
   disr = list(

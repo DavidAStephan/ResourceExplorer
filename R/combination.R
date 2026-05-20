@@ -42,7 +42,7 @@ augment_with_combinations <- function(backtest) {
     dplyr::group_by(.data$commodity) |>
     dplyr::mutate(w = (1 / .data$rmse^2) / sum(1 / .data$rmse^2)) |>
     dplyr::ungroup() |>
-    dplyr::select(.data$commodity, .data$spec, .data$w)
+    dplyr::select(dplyr::all_of(c("commodity", "spec", "w")))
 
   rows_with_predictions <- backtest |>
     dplyr::filter(!is.na(.data$point_estimate))
@@ -127,9 +127,9 @@ oos_diagnostics <- function(backtest_augmented) {
       ratio_vs_naive = .data$rmse_valid / .data$rmse_naive,
       r_squared_oos  = 1 - .data$ssr / pmax(.data$sst, 1e-12)
     ) |>
-    dplyr::select(.data$commodity, .data$spec, .data$rmse_valid,
-                  .data$rmse_naive, .data$ratio_vs_naive,
-                  .data$r_squared_oos)
+    dplyr::select(dplyr::all_of(c("commodity", "spec", "rmse_valid",
+                                  "rmse_naive", "ratio_vs_naive",
+                                  "r_squared_oos")))
 }
 
 #' Pick the per-commodity production model from the OOS diagnostics.

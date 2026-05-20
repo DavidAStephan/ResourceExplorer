@@ -45,8 +45,8 @@ build_features <- function(portwatch, disr_req, cfg) {
                      volume_Mt = .data$tonnes_Mt)
 
   wide <- tonnage_m |>
-    dplyr::select(.data$commodity, .data$quarter_end, .data$mwq,
-                  .data$tonnage) |>
+    dplyr::select(dplyr::all_of(c("commodity", "quarter_end", "mwq",
+                                  "tonnage"))) |>
     tidyr::pivot_wider(names_from  = "mwq",
                        values_from = "tonnage",
                        names_prefix = "tonnage_m",

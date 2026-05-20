@@ -106,11 +106,14 @@ jobs:
 
           # Generate the index from a single Rscript template that reads
           # the live nowcast CSV so the headline numbers on the landing
-          # page match the briefing.
+          # page match the briefing. Pass the nowcast-history rds so the
+          # landing page can also render the WoW delta and per-date
+          # archive values.
           Rscript scripts/build_index.R \
             --site "$SITE" \
             --today "$TODAY" \
-            --repo "$GH_REPO"
+            --repo "$GH_REPO" \
+            --history data/warehouse/mart_nowcast_history.rds
 
           echo "site_dir=$SITE" >> "$GITHUB_OUTPUT"
 
@@ -163,22 +166,66 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       issues: write
+      actions: read     # download the log artifact uploaded by run-pipeline
     steps:
+      - name: Download log artifact from run-pipeline
+        uses: actions/download-artifact@v5
+        with:
+          name: nowcast-logs-${{ github.run_id }}
+          path: ./_logs
+        continue-on-error: true   # still open an issue even if logs missing
+
+      - name: Tail the most recent log file
+        id: tail
+        run: |
+          set -euo pipefail
+          LOG_FILE=$(ls -t ./_logs/*.log 2>/dev/null | head -1 || true)
+          if [ -n "${LOG_FILE}" ] && [ -f "${LOG_FILE}" ]; then
+            # Last 30 lines, escaped via base64 to survive the YAML/JS hop.
+            tail -n 30 "${LOG_FILE}" | base64 > ./_logs/tail.b64
+            {
+              echo "tail_b64<<EOF"
+              cat ./_logs/tail.b64
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            echo "log_file=$(basename "${LOG_FILE}")" >> "$GITHUB_OUTPUT"
+          else
+            echo "tail_b64=" >> "$GITHUB_OUTPUT"
+            echo "log_file=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Open / update failure issue
         uses: actions/github-script@v9
+        env:
+          LOG_TAIL_B64: ${{ steps.tail.outputs.tail_b64 }}
+          LOG_FILE:     ${{ steps.tail.outputs.log_file }}
         with:
           script: |
-            const title = "[weekly-nowcast] run failed";
+            const title  = "[weekly-nowcast] run failed";
             const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            let logBlock = "";
+            const tailB64 = process.env.LOG_TAIL_B64 || "";
+            const logFile = process.env.LOG_FILE     || "";
+            if (tailB64) {
+              const tail = Buffer.from(tailB64, "base64").toString("utf8").trim();
+              logBlock = [
+                "",
+                `**Last 30 lines of \`${logFile}\`:**`,
+                "```",
+                tail,
+                "```",
+              ].join("\n");
+            }
             const body = [
               `Weekly pipeline failed at ${new Date().toISOString()}.`,
               ``,
               `Failed run: ${runUrl}`,
+              logBlock,
               ``,
               `If this is a transient IMF PortWatch or DISR issue, re-run via`,
               `the Actions tab (workflow_dispatch). If it persists, inspect`,
-              `the run log artifact and the most recent commit on the \`data\``,
-              `branch.`,
+              `the most recent commit on the \`data\` branch and the full log`,
+              `artifact attached to the failing run.`,
               ``,
               `This issue auto-closes on the next successful run.`,
             ].join("\n");

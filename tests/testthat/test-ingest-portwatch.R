@@ -85,23 +85,19 @@ test_that("derive_portwatch_commodity_rows routes vessel types correctly", {
     commodity_class = c("iron_ore",     "coal",      "lng",    "other")
   )
 
-  out <- derive_portwatch_commodity_rows(
-    wide, ports_meta,
-    lng_ports = c("Darwin", "Dampier", "Gladstone", "Gorgon LNG", "Onslow")
-  )
+  out <- derive_portwatch_commodity_rows(wide, ports_meta)
 
-  # iron_ore dry_bulk at Port Hedland, coal dry_bulk at Newcastle, lng
-  # tanker at Darwin. Brisbane container + Port Bonython tanker are both
-  # dropped (container has no commodity mapping; tanker at non-LNG port
-  # is filtered).
-  expect_equal(nrow(out), 3)
-  expect_setequal(out$commodity, c("iron_ore", "coal", "lng"))
+  # iron_ore dry_bulk at Port Hedland, coal dry_bulk at Newcastle.
+  # Everything tanker / container / general_cargo / roro is dropped:
+  # the bridge only consumes iron-ore and coal, and LNG was scoped out
+  # 2026-04-21 because tanker tonnage doesn't track LNG volumes.
+  expect_equal(nrow(out), 2)
+  expect_setequal(out$commodity, c("iron_ore", "coal"))
   expect_equal(out$tonnage[out$commodity == "iron_ore"], 1000)
   expect_equal(out$tonnage[out$commodity == "coal"],      500)
-  expect_equal(out$tonnage[out$commodity == "lng"],       700)
 })
 
-test_that("derive_portwatch_commodity_rows drops tanker at non-LNG ports", {
+test_that("derive_portwatch_commodity_rows drops all tanker tonnage", {
   wide <- tibble::tibble(
     obs_date             = as.Date("2024-01-01"),
     portid               = "port937",
@@ -113,10 +109,7 @@ test_that("derive_portwatch_commodity_rows drops tanker at non-LNG ports", {
   )
   ports_meta <- tibble::tibble(port_name = character(),
                                 commodity_class = character())
-  out <- derive_portwatch_commodity_rows(
-    wide, ports_meta,
-    lng_ports = c("Darwin", "Dampier", "Gladstone", "Gorgon LNG", "Onslow")
-  )
+  out <- derive_portwatch_commodity_rows(wide, ports_meta)
   expect_equal(nrow(out), 0)
 })
 
