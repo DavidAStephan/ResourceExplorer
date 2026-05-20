@@ -234,14 +234,14 @@ build_nowcast_pred_frame <- function(features, portwatch, cfg, as_of, fits) {
       yoy_log_tonnage_m2 = .data$log_tonnage_m2 - .data$log_tonnage_m2_lag4,
       yoy_log_tonnage_m3 = .data$log_tonnage_m3 - .data$log_tonnage_m3_lag4
     ) |>
-    dplyr::select(.data$commodity, .data$quarter_end, .data$tonnage,
-                  .data$tonnage_m1, .data$tonnage_m2, .data$tonnage_m3,
-                  .data$log_tonnage, .data$log_tonnage_m1,
-                  .data$log_tonnage_m2, .data$log_tonnage_m3,
-                  .data$yoy_log_tonnage,
-                  .data$yoy_log_tonnage_m1, .data$yoy_log_tonnage_m2,
-                  .data$yoy_log_tonnage_m3,
-                  .data$log_volume_lag4)
+    dplyr::select(dplyr::all_of(c(
+      "commodity", "quarter_end", "tonnage",
+      "tonnage_m1", "tonnage_m2", "tonnage_m3",
+      "log_tonnage", "log_tonnage_m1", "log_tonnage_m2", "log_tonnage_m3",
+      "yoy_log_tonnage",
+      "yoy_log_tonnage_m1", "yoy_log_tonnage_m2", "yoy_log_tonnage_m3",
+      "log_volume_lag4"
+    )))
 }
 
 #' @keywords internal

@@ -48,11 +48,7 @@ fetch_portwatch_tonnage <- function(cfg, db_ready) {
       out
     })
     if (identical(attr(wide, "cache_status"), "stale")) status <- "cached"
-    derive_portwatch_commodity_rows(
-      wide,
-      ports_metadata,
-      lng_ports = cfg$portwatch$lng_ports %||% character(0)
-    )
+    derive_portwatch_commodity_rows(wide, ports_metadata)
   },
   error = function(e) {
     status <<- "error"
@@ -242,16 +238,13 @@ parse_portwatch_features <- function(json_body) {
 #'
 #' **Commodity rules.**
 #'
-#' - `export_tanker` **at a port in `lng_ports`** -> `lng`. Other tanker
-#'   tonnage (refined petroleum, bunkers, LPG) is dropped; a port-level
-#'   investigation on 2026-04-21 showed non-LNG tanker activity was
-#'   contaminating and dragging the aggregate — the real LNG ports
-#'   (Dampier, Gladstone, Darwin, Gorgon LNG, Onslow) are stable to
-#'   growing. The whitelist comes from `cfg$portwatch$lng_ports`.
 #' - `export_dry_bulk` at an iron-ore-class port -> `iron_ore`.
 #' - `export_dry_bulk` at a coal-class port -> `coal`.
-#' - All other vessel types and all other tanker -> dropped (no "other"
-#'   bucket in the current per-commodity-volume spec).
+#' - Tanker tonnage and all other vessel types -> dropped. LNG was
+#'   scoped out 2026-04-21 (PortWatch tanker tonnage has near-zero
+#'   correlation with ABS LNG volumes — Australian LNG is contract-
+#'   dominated, not vessel-call-dominated). Iron-ore + coal are the
+#'   only commodities the bridge consumes.
 #'
 #' Port commodity classes come from `inst/extdata/ports_metadata.csv`
 #' via a join on `portname`.
@@ -262,14 +255,12 @@ parse_portwatch_features <- function(json_body) {
 #'   port-day, wide on vessel-type columns).
 #' @param ports_metadata Tibble with `port_name` and `commodity_class`
 #'   columns. Other columns are ignored.
-#' @param lng_ports Character vector of `portname` strings that are
-#'   genuine LNG export facilities. Tanker tonnage at these ports is
-#'   routed to `lng`; tanker tonnage anywhere else is dropped.
 #' @return Long tibble: `obs_date`, `port_id`, `commodity`, `tonnage`,
 #'   `vessel_count`, `ingested_at`.
 #' @export
-derive_portwatch_commodity_rows <- function(wide, ports_metadata,
-                                            lng_ports = character(0)) {
+derive_portwatch_commodity_rows <- function(wide, ports_metadata, ...) {
+  # Variadic `...` swallows the legacy `lng_ports = ...` argument so any
+  # external caller from before the 2026-05-20 LNG removal still works.
   empty <- tibble::tibble(
     obs_date     = as.Date(character()),
     port_id      = character(),
@@ -280,8 +271,6 @@ derive_portwatch_commodity_rows <- function(wide, ports_metadata,
   )
   if (nrow(wide) == 0) return(empty)
 
-  # Normalise the ports-metadata join side. Left-join so we keep every
-  # PortWatch row; ports absent from metadata get class = "other".
   ports_min <- ports_metadata |>
     dplyr::transmute(
       portname        = .data$port_name,
@@ -291,8 +280,7 @@ derive_portwatch_commodity_rows <- function(wide, ports_metadata,
   long <- wide |>
     dplyr::left_join(ports_min, by = "portname") |>
     dplyr::mutate(
-      commodity_class = dplyr::coalesce(.data$commodity_class, "other"),
-      is_lng_port     = .data$portname %in% lng_ports
+      commodity_class = dplyr::coalesce(.data$commodity_class, "other")
     ) |>
     tidyr::pivot_longer(
       cols      = dplyr::starts_with("export_"),
@@ -303,7 +291,6 @@ derive_portwatch_commodity_rows <- function(wide, ports_metadata,
     dplyr::mutate(
       tonnage = as.double(.data$tonnage),
       commodity = dplyr::case_when(
-        .data$vessel_type == "tanker"   & .data$is_lng_port                   ~ "lng",
         .data$vessel_type == "dry_bulk" & .data$commodity_class == "iron_ore" ~ "iron_ore",
         .data$vessel_type == "dry_bulk" & .data$commodity_class == "coal"     ~ "coal",
         TRUE                                                                   ~ NA_character_
