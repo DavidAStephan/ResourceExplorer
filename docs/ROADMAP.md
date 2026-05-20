@@ -7,6 +7,12 @@ that would extend the system but aren't on the immediate path.
 
 ## Open / future
 
+> **Detailed plan available:** [`docs/PLAN_LNG_AND_DEMAND.md`](PLAN_LNG_AND_DEMAND.md)
+> covers both the LNG re-scope and the China-demand-indicator paths with
+> phases, effort estimates, blocking decisions, and definitions of done.
+> The notes below summarise; the plan doc is what to read before
+> committing time.
+
 ### Deeper external demand signal
 
 Tier 4 #1 shipped a World-Bank Pink Sheet price ingest + `price_aug`
