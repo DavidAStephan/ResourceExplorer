@@ -66,7 +66,12 @@ run_step <- function(name, fn, deps = character(0), force = FORCE,
   result <- fn()
   dur <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
   log_info("done %-34s [%5.1fs]", name, dur)
-  if (is.data.frame(result) && !fs::file_exists(out_path)) {
+  # Always persist when the step actually ran. The earlier
+  # `!fs::file_exists(out_path)` guard meant a `--force` rerun would
+  # recompute in memory but leave the previous rds on disk -- silently
+  # invisible until a schema change exposed it (the 2026-05-20
+  # coal_met / coal_thermal split was the first time this surfaced).
+  if (is.data.frame(result)) {
     wh_write(name, result, cfg)
   }
   result
