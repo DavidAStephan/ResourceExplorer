@@ -252,11 +252,40 @@ build_nowcast_pred_frame <- function(features, portwatch, cfg, as_of, fits) {
     tibble::tibble(commodity = character(), log_price_lag4 = double())
   }
 
-  wide_mwq |>
+  # Same pattern for FRED demand indicators: latest observed value per
+  # series → `log_demand_<series>_now`, year-ago value → `_lag4`. The
+  # `yoy_log_demand_<series>` regressor materialises by subtraction in
+  # the final mutate below. Columns absent from the feature panel
+  # (offline / fork build with no FRED ingest) produce NAs naturally.
+  demand_cols <- grep("^log_demand_", names(features), value = TRUE)
+  cur_demand <- if (length(demand_cols) > 0L) {
+    features |>
+      dplyr::group_by(.data$commodity) |>
+      dplyr::slice_max(.data$quarter_end, n = 1L) |>
+      dplyr::ungroup() |>
+      dplyr::select(dplyr::all_of(c("commodity", demand_cols))) |>
+      stats::setNames(c("commodity",
+                        sub("^log_demand_", "log_demand_now_", demand_cols)))
+  } else {
+    tibble::tibble(commodity = character())
+  }
+  lag4_demand <- if (length(demand_cols) > 0L) {
+    features |>
+      dplyr::filter(.data$quarter_end == q_minus4_date) |>
+      dplyr::select(dplyr::all_of(c("commodity", demand_cols))) |>
+      stats::setNames(c("commodity",
+                        sub("^log_demand_", "log_demand_lag4_", demand_cols)))
+  } else {
+    tibble::tibble(commodity = character())
+  }
+
+  pred <- wide_mwq |>
     dplyr::left_join(lag4,         by = "commodity") |>
     dplyr::left_join(prev,         by = "commodity") |>
     dplyr::left_join(cur_price,    by = "commodity") |>
     dplyr::left_join(lag4_price,   by = "commodity") |>
+    dplyr::left_join(cur_demand,   by = "commodity") |>
+    dplyr::left_join(lag4_demand,  by = "commodity") |>
     dplyr::left_join(share_by_com, by = "commodity") |>
     dplyr::mutate(
       quarter_end        = q_end,
@@ -271,17 +300,35 @@ build_nowcast_pred_frame <- function(features, portwatch, cfg, as_of, fits) {
       yoy_log_tonnage_m2 = .data$log_tonnage_m2 - .data$log_tonnage_m2_lag4,
       yoy_log_tonnage_m3 = .data$log_tonnage_m3 - .data$log_tonnage_m3_lag4,
       yoy_log_price      = .data$log_price_now  - .data$log_price_lag4
-    ) |>
-    dplyr::select(dplyr::all_of(c(
-      "commodity", "quarter_end", "tonnage",
-      "tonnage_m1", "tonnage_m2", "tonnage_m3",
-      "log_tonnage", "log_tonnage_m1", "log_tonnage_m2", "log_tonnage_m3",
-      "yoy_log_tonnage",
-      "yoy_log_tonnage_m1", "yoy_log_tonnage_m2", "yoy_log_tonnage_m3",
-      "yoy_log_tonnage_lag1",
-      "yoy_log_price",
-      "log_volume_lag4"
-    )))
+    )
+
+  # Materialise `yoy_log_demand_<series>` columns by subtracting the
+  # lag-4 from the current value for each FRED series wired up. Skipped
+  # cleanly when no demand columns exist.
+  for (col in demand_cols) {
+    nm   <- sub("^log_demand_", "", col)
+    cur  <- paste0("log_demand_now_",  nm)
+    lag4 <- paste0("log_demand_lag4_", nm)
+    out  <- paste0("yoy_log_demand_",  nm)
+    if (all(c(cur, lag4) %in% names(pred))) {
+      pred[[out]] <- pred[[cur]] - pred[[lag4]]
+    } else {
+      pred[[out]] <- NA_real_
+    }
+  }
+
+  keep_cols <- c(
+    "commodity", "quarter_end", "tonnage",
+    "tonnage_m1", "tonnage_m2", "tonnage_m3",
+    "log_tonnage", "log_tonnage_m1", "log_tonnage_m2", "log_tonnage_m3",
+    "yoy_log_tonnage",
+    "yoy_log_tonnage_m1", "yoy_log_tonnage_m2", "yoy_log_tonnage_m3",
+    "yoy_log_tonnage_lag1",
+    "yoy_log_price",
+    "log_volume_lag4",
+    grep("^yoy_log_demand_", names(pred), value = TRUE)
+  )
+  pred[, intersect(keep_cols, names(pred)), drop = FALSE]
 }
 
 #' @keywords internal

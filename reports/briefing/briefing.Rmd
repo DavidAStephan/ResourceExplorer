@@ -841,6 +841,33 @@ build_eq_entry <- function(com) {
         fmt_signed(co[["yoy_log_tonnage_lag1"]], 3),
         fmt_signed(co[["log_volume_lag4"]], 3)
       )
+    } else if (spec == "price_aug") {
+      eq <- sprintf(
+        "\\log V_{Q} \\;=\\; %.3f \\;%s \\,\\Delta_{4}\\log T_{Q} \\;%s \\,\\Delta_{4}\\log P_{Q} \\;%s \\,\\log V_{Q-4} \\;+\\; \\varepsilon_{Q}",
+        co[["(Intercept)"]],
+        fmt_signed(co[["yoy_log_tonnage"]], 3),
+        fmt_signed(co[["yoy_log_price"]], 3),
+        fmt_signed(co[["log_volume_lag4"]], 3)
+      )
+    } else if (spec == "demand_aug") {
+      # demand_aug's RHS varies per commodity (iron_ore: CLI, coal_thermal:
+      # exports). Render the surviving demand regressor(s) as a sum.
+      demand_terms <- grep("^yoy_log_demand_", names(co), value = TRUE)
+      demand_tex <- paste(
+        vapply(demand_terms, function(t) {
+          sprintf("%s \\,\\Delta_{4}\\log D^{\\,%s}_{Q}",
+                  fmt_signed(co[[t]], 3),
+                  sub("^yoy_log_demand_", "", t))
+        }, character(1)),
+        collapse = " \\;"
+      )
+      eq <- sprintf(
+        "\\log V_{Q} \\;=\\; %.3f \\;%s \\,\\Delta_{4}\\log T_{Q} \\;%s \\;%s \\,\\log V_{Q-4} \\;+\\; \\varepsilon_{Q}",
+        co[["(Intercept)"]],
+        fmt_signed(co[["yoy_log_tonnage"]], 3),
+        demand_tex,
+        fmt_signed(co[["log_volume_lag4"]], 3)
+      )
     } else {
       eq <- ""
     }
@@ -889,7 +916,7 @@ prod_entries <- lapply(unique(nowcast_h0$commodity), function(com) {
 
 ### Production equation per commodity
 
-These are the actual equations driving the headline nowcast above. One per commodity, picked by walk-forward backtest RMSE from a bench of `{aggregate, midas, bojo, lagged, equal_avg, inv_mse}` specs.
+These are the actual equations driving the headline nowcast above. One per commodity, picked by walk-forward backtest RMSE from a bench of `{aggregate, midas, bojo, lagged, price_aug, demand_aug, equal_avg, inv_mse}` specs.
 
 ```{r prod-equations-show, results='asis'}
 emit <- function(label, entry) {

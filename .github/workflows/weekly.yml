@@ -82,6 +82,11 @@ jobs:
 
       - name: Run pipeline (--ci fails on all-stale ingest)
         run: Rscript run.R --ci
+        env:
+          # FRED key for the demand_aug candidate spec. When unset
+          # (e.g. on a fork without the secret) the FRED ingest skips
+          # gracefully and the bench drops demand_aug per commodity.
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
 
       - name: Build Pages site
         id: site

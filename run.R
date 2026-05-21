@@ -111,12 +111,18 @@ raw_wb_prices <- run_step("raw_wb_prices_quarterly",
   function() fetch_wb_prices(cfg, cfg$paths$warehouse_dir),
   is_ingest = TRUE)
 
+raw_fred_demand <- run_step("raw_fred_demand_quarterly",
+  function() fetch_fred_demand(cfg, cfg$paths$warehouse_dir),
+  is_ingest = TRUE)
+
 features <- run_step("derived_features",
   function() build_features(raw_portwatch, raw_disr, cfg,
-                            wb_prices = raw_wb_prices),
+                            wb_prices   = raw_wb_prices,
+                            fred_demand = raw_fred_demand),
   deps = c(wh_path("raw_portwatch_tonnage_daily", cfg),
            wh_path("raw_disr_req_quarterly",     cfg),
-           wh_path("raw_wb_prices_quarterly",    cfg)))
+           wh_path("raw_wb_prices_quarterly",    cfg),
+           wh_path("raw_fred_demand_quarterly",  cfg)))
 
 # Live-nowcast bridge: fit on every training quarter we have, up to the
 # latest DISR-published observation. (Backtest fits use an expanding-

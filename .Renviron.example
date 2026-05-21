@@ -1,9 +1,14 @@
 # Copy to .Renviron (gitignored) and fill in values.
 # Reload with readRenviron(".Renviron") or by restarting R.
-#
-# resourcetracker currently requires no API keys. PortWatch and DISR
-# are both public endpoints. This file is kept as a placeholder so that
-# any future env-driven overrides have a documented spot.
+
+# Optional: FRED API key for the China-demand `demand_aug` candidate
+# spec. Register a free key at
+#   https://fred.stlouisfed.org/docs/api/api_key.html
+# When unset the pipeline skips the FRED ingest entirely (the
+# `demand_aug` bridge spec then has no regressors to fit and is
+# dropped per commodity automatically) -- this keeps offline / fork
+# runs working without leaking a key requirement.
+# FRED_API_KEY=
 
 # Optional: override the log level (TRACE/DEBUG/INFO/WARN/ERROR)
 # RESOURCETRACKER_LOG_LEVEL=INFO

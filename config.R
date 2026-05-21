@@ -60,6 +60,23 @@ list(
     seed           = 20260419L
   ),
 
+  # FRED China-demand indicators consumed by the `demand_aug` bridge
+  # spec. When `FRED_API_KEY` is unset (offline / fork builds) the
+  # ingest short-circuits and the bench drops `demand_aug` per commodity
+  # automatically via the existing `fit_bridge_one` guardrails.
+  # Series IDs verified live 2026-05-21 -- the originally-proposed
+  # `CHNPRMNTO01IXOBSAM` (steel) and `CHNPIEAEN01GPSAM` (electricity)
+  # were retired by OECD; substitutes below have been live since the
+  # 1990s and update monthly.
+  fred = list(
+    api_key_env = "FRED_API_KEY",
+    series = list(
+      iron_ore     = c(cli     = "CHNLOLITOAASTSAM"),
+      coal_thermal = c(exports = "XTEXVA01CNM667S")
+    ),
+    retry = list(max_attempts = 3L, backoff_seconds = 5L)
+  ),
+
   bridge = list(
     hac_lag = 1L,
     min_n   = 12L,
@@ -69,7 +86,8 @@ list(
     #   midas     -- three free monthly betas, free beta_lag4
     #   bojo      -- pure YoY-on-YoY (beta_lag4 forced to 1)
     #   lagged    -- aggregate + 1-quarter-lagged tonnage term
-    candidates = c("aggregate", "midas", "bojo", "lagged", "price_aug")
+    candidates = c("aggregate", "midas", "bojo", "lagged", "price_aug",
+                   "demand_aug")
   ),
 
   logging = list(

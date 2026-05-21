@@ -33,7 +33,9 @@
 #' @param cfg Config list.
 #' @return Tibble keyed by `(commodity, quarter_end)`.
 #' @export
-build_features <- function(portwatch, disr_req, cfg, wb_prices = NULL) {
+build_features <- function(portwatch, disr_req, cfg,
+                           wb_prices   = NULL,
+                           fred_demand = NULL) {
   commodities <- cfg$commodities
 
   # PortWatch can't disaggregate dry-bulk at coal ports into metallurgical
@@ -55,6 +57,22 @@ build_features <- function(portwatch, disr_req, cfg, wb_prices = NULL) {
     tibble::tibble(commodity = character(),
                    quarter_end = as.Date(character()),
                    log_price = double())
+  }
+
+  # Optional FRED demand-indicator columns. Pivot the long
+  # (commodity, series, quarter_end, log_value) tibble to one column per
+  # series with prefix `log_demand_`. Absent series stay NA (handled
+  # downstream by `fit_bridge_one`'s near-zero-variance / NA skip).
+  demand_join <- if (!is.null(fred_demand) && nrow(fred_demand) > 0) {
+    fred_demand |>
+      dplyr::select(dplyr::all_of(c("commodity", "quarter_end", "series",
+                                    "log_value"))) |>
+      tidyr::pivot_wider(names_from  = "series",
+                         values_from = "log_value",
+                         names_prefix = "log_demand_")
+  } else {
+    tibble::tibble(commodity = character(),
+                   quarter_end = as.Date(character()))
   }
 
   # LHS: physical tonnage (Mt) by commodity, quarterly.
@@ -79,12 +97,19 @@ build_features <- function(portwatch, disr_req, cfg, wb_prices = NULL) {
   }
 
   feats <- dplyr::inner_join(lhs, wide, by = c("commodity", "quarter_end")) |>
-    dplyr::left_join(price_join, by = c("commodity", "quarter_end"))
+    dplyr::left_join(price_join, by = c("commodity", "quarter_end")) |>
+    dplyr::left_join(demand_join, by = c("commodity", "quarter_end"))
   # Ensure log_price always exists so the downstream mutate doesn't fail
   # when price_join had zero matching rows (e.g. price ingest disabled).
   if (!"log_price" %in% names(feats)) feats$log_price <- NA_real_
 
-  feats |>
+  # Names of the FRED demand columns we just joined. May be empty when
+  # `fred_demand` is NULL or unset; the YoY mutate below skips them
+  # in that case.
+  demand_cols <- setdiff(grep("^log_demand_", names(feats), value = TRUE),
+                         character())
+
+  feats <- feats |>
     dplyr::group_by(.data$commodity) |>
     dplyr::arrange(.data$quarter_end, .by_group = TRUE) |>
     dplyr::mutate(
@@ -124,7 +149,23 @@ build_features <- function(portwatch, disr_req, cfg, wb_prices = NULL) {
       # skips this candidate via the existing complete_cases guard.
       yoy_log_price       = .data$log_price - dplyr::lag(.data$log_price, 4L)
     ) |>
-    dplyr::ungroup() |>
+    dplyr::ungroup()
+
+  # YoY-difference each FRED demand series, mirroring the YoY treatment
+  # of price / tonnage above. Same NA-propagation semantics: when the
+  # series wasn't joined (commodity has no FRED mapping in this pass)
+  # the column stays NA and `fit_bridge_one` skips `demand_aug` for
+  # that commodity automatically.
+  for (col in demand_cols) {
+    yoy_name <- sub("^log_demand_", "yoy_log_demand_", col)
+    feats <- feats |>
+      dplyr::group_by(.data$commodity) |>
+      dplyr::arrange(.data$quarter_end, .by_group = TRUE) |>
+      dplyr::mutate(!!yoy_name := .data[[col]] - dplyr::lag(.data[[col]], 4L)) |>
+      dplyr::ungroup()
+  }
+
+  feats |>
     dplyr::filter(is.finite(.data$log_volume))
 }
 
