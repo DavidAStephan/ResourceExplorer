@@ -211,15 +211,24 @@ figcaption {
   margin-top: var(--s-2);
 }
 
-/* TABLE OF CONTENTS (rmarkdown sidebar) ----------------------------------- */
-
+/* TABLE OF CONTENTS (rmarkdown inline) ------------------------------------ */
+/* `html_document` doesn't reserve a sidebar column, so sticky positioning
+   makes the TOC overlap the main content as the page scrolls. We render
+   inline at the top instead -- visible on arrival, scrolls away with the
+   rest. To make it a proper persistent sidebar we'd switch to
+   `toc_float: true` (and pull in Bootstrap) -- not worth it for this
+   page's length. */
 #TOC {
-  position: sticky;
-  top: var(--s-4);
   font-family: var(--font-sans);
   font-size: 0.85rem;
+  margin: var(--s-4) 0 var(--s-6);
+  padding: var(--s-3) var(--s-4);
+  background: var(--surface-tint);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  max-width: var(--measure);
 }
-#TOC ul { list-style: none; padding-left: var(--s-3); }
+#TOC ul { list-style: none; padding-left: var(--s-3); margin: 0; }
 #TOC > ul { padding-left: 0; }
 #TOC li { margin: var(--s-1) 0; }
 #TOC a { border: 0; color: var(--text-muted); }
