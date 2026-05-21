@@ -279,13 +279,18 @@ text-align: center;
 margin-top: var(--s-2);
 }
 
+
 #TOC {
-position: sticky;
-top: var(--s-4);
 font-family: var(--font-sans);
 font-size: 0.85rem;
+margin: var(--s-4) 0 var(--s-6);
+padding: var(--s-3) var(--s-4);
+background: var(--surface-tint);
+border: 1px solid var(--border);
+border-radius: 4px;
+max-width: var(--measure);
 }
-#TOC ul { list-style: none; padding-left: var(--s-3); }
+#TOC ul { list-style: none; padding-left: var(--s-3); margin: 0; }
 #TOC > ul { padding-left: 0; }
 #TOC li { margin: var(--s-1) 0; }
 #TOC a { border: 0; color: var(--text-muted); }
@@ -489,21 +494,21 @@ Current quarter — June 2026 · 56% of the quarter observed
 <div class="value-row">
 <span class="value">236.0</span><span class="unit">Mt</span>
 </div>
-<span class="ci">80% CI · 232.4 – 239.0 Mt</span><span class="delta flat">+0.0 Mt  (+0.0%) vs the run 23h ago</span>
+<span class="ci">80% CI · 232.4 – 239.0 Mt</span><span class="delta flat">+0.0 Mt  (+0.0%) vs the run 0h ago</span>
 </div>
 <div class="headline-card">
 <span class="label">Metallurgical coal</span>
 <div class="value-row">
 <span class="value">38.2</span><span class="unit">Mt</span>
 </div>
-<span class="ci">80% CI · 37.2 – 39.6 Mt</span><span class="delta flat">+0.0 Mt  (+0.0%) vs the run 23h ago</span>
+<span class="ci">80% CI · 37.2 – 39.6 Mt</span><span class="delta flat">+0.0 Mt  (+0.0%) vs the run 0h ago</span>
 </div>
 <div class="headline-card">
 <span class="label">Thermal coal</span>
 <div class="value-row">
 <span class="value">49.6</span><span class="unit">Mt</span>
 </div>
-<span class="ci">80% CI · 47.2 – 52.0 Mt</span><span class="delta flat">+0.0 Mt  (+0.0%) vs the run 23h ago</span>
+<span class="ci">80% CI · 47.2 – 52.0 Mt</span><span class="delta flat">+0.0 Mt  (+0.0%) vs the run 0h ago</span>
 </div>
 </div>
 <h3 style="margin-top:1.5rem">
@@ -1156,7 +1161,7 @@ whose current quarter has no prior nowcast.</caption>
 <td align="right">236.02</td>
 <td align="right">0</td>
 <td align="right">0</td>
-<td align="right">23.2</td>
+<td align="right">0.4</td>
 </tr>
 <tr class="even">
 <td align="left">coal_met</td>
@@ -1165,7 +1170,7 @@ whose current quarter has no prior nowcast.</caption>
 <td align="right">38.22</td>
 <td align="right">0</td>
 <td align="right">0</td>
-<td align="right">23.2</td>
+<td align="right">0.4</td>
 </tr>
 <tr class="odd">
 <td align="left">coal_thermal</td>
@@ -1174,7 +1179,7 @@ whose current quarter has no prior nowcast.</caption>
 <td align="right">49.59</td>
 <td align="right">0</td>
 <td align="right">0</td>
-<td align="right">23.2</td>
+<td align="right">0.4</td>
 </tr>
 </tbody>
 </table>
