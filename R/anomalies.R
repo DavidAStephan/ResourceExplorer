@@ -13,8 +13,7 @@
 #' @param window_days Half-width of the seasonal-norm smoothing window.
 #' @param threshold `|z|` flag threshold.
 #' Also overwrites `mart.latest_anomalies` with the detected rows so
-#' the briefing and dashboard can query them without re-running the
-#' detection.
+#' the briefing can query them without re-running the detection.
 #'
 #' @return Tibble: `obs_date`, `port_id`, `commodity`, `tonnage`,
 #'   `expected`, `sd`, `z_score`, sorted descending by `|z_score|`.

@@ -150,6 +150,8 @@ production_label <- if (nrow(choice) > 0) {
   NULL
 }
 
+coverage <- backtest_coverage(backtest_aug, bridge_fits_bench, cfg)
+
 nowcast_current <- run_step("derived_nowcast_current",
   function() run_nowcast(prod_models, features, cfg,
                          portwatch  = raw_portwatch,
@@ -159,6 +161,9 @@ nowcast_current <- run_step("derived_nowcast_current",
            wh_path("derived_features",          cfg),
            wh_path("raw_portwatch_tonnage_daily", cfg)))
 
+nowcast_current <- decompose_nowcast(nowcast_current, prod_models,
+                                     features, raw_portwatch, cfg)
+
 anomalies <- detect_anomalies(raw_portwatch, cfg)
 save_nowcast_run(cfg, nowcast_current)
 
@@ -166,7 +171,8 @@ save_nowcast_run(cfg, nowcast_current)
 
 csv_paths <- write_csv_outputs(nowcast_current, raw_portwatch,
                                bridge_fits_bench, backtest_aug, cfg,
-                               production_label = production_label)
+                               production_label = production_label,
+                               coverage         = coverage)
 
 if (!SKIP_REPORT) {
   render_briefing("reports/briefing/briefing.Rmd",

@@ -7,10 +7,11 @@ that would extend the system but aren't on the immediate path.
 
 ## Open / future
 
-> **Detailed plan available:** [`docs/PLAN_LNG_AND_DEMAND.md`](PLAN_LNG_AND_DEMAND.md)
-> covers both the LNG re-scope and the China-demand-indicator paths with
-> phases, effort estimates, blocking decisions, and definitions of done.
-> The notes below summarise; the plan doc is what to read before
+> **Detailed plans available:**
+> - China demand indicator (the next-up item): [`docs/PLAN_CHINA_DEMAND.md`](PLAN_CHINA_DEMAND.md)
+> - LNG re-scope (deferred indefinitely): [`docs/PLAN_LNG_AND_DEMAND.md`](PLAN_LNG_AND_DEMAND.md) § Plan A
+>
+> The notes below summarise; the plan docs are what to read before
 > committing time.
 
 ### Deeper external demand signal
@@ -75,72 +76,10 @@ scope.
 ## Backlog — newly identified (2026-05-21 review)
 
 Items surfaced by a fresh pass over the project after Tier 4 landed.
-Ordered roughly by ROI. None of these are blocking; pick what's
-interesting.
+Eight of the ten items below landed on 2026-05-21 (see the Completed
+section); two remain.
 
-### 1. Automated nowcast-vs-actual comparison when DISR publishes
-
-**Effort:** ~4 hours. **Why:** the original `PROJECT_BRIEF.txt` called
-this out explicitly — *"When March 2026 ITG is released by ABS in
-early May, I can compare my April 1 nowcast to the ABS actual and
-quantify the forecast error"*. The pieces are already in place:
-`mart_nowcast_history` has every past nowcast keyed by
-`(commodity, quarter_end, run_timestamp)`; the weekly pipeline detects
-fresh DISR releases via the ingest layer; the only missing piece is a
-briefing chunk that joins prior-quarter nowcasts to the just-released
-actual and shows per-commodity forecast error. Closes the validation
-loop on the live page.
-
-### 2. Backtest visualization in the briefing
-
-**Effort:** ~2 hours. **Why:** the "Bridge diagnostics" section
-currently reports OOS RMSE in a table. A per-commodity actuals-vs-
-forecast time-series chart (production spec highlighted; non-winning
-specs shown faded) would make model skill visible at a glance. Sits
-naturally below the existing diagnostics table.
-
-### 3. Coverage / calibration check
-
-**Effort:** ~3 hours. **Why:** we publish 80% and 95% CIs but never
-verify they're calibrated — empirical coverage on the validation set
-could easily be 60% or 99%. Compute "fraction of held-out actuals
-inside the band" per commodity per band, add to
-`bridge_diagnostics.csv`, surface in the briefing diagnostics table.
-If miscalibrated, document or adjust (see #9 below).
-
-### 4. Surface the anomaly detection in the briefing
-
-**Effort:** ~1 hour. **Why:** `R/anomalies.R` produces
-`mart_latest_anomalies` already, but the briefing never references it.
-The methodology doc claims a "Flagged anomalies (departures >2σ from
-seasonal norm)" section that doesn't exist. One-shot fix: read the
-table, render the top 5 anomalies as a small block in the briefing.
-
-### 5. Verify (or remove) the Shiny dashboard
-
-**Effort:** ~1-2 hours. **Why:** `reports/dashboard/app.R` hasn't been
-touched since the scope narrowed and the schema changed (added
-`horizon`, split coal). Almost certainly broken against current data.
-Either fix it to current schema or delete the file and the
-`shiny` Suggests dep.
-
-### 6. WoW decomposition / attribution
-
-**Effort:** ~3 hours. **Why:** the headline shows "Iron ore +1.2 Mt
-WoW" but not *why*. The bridge coefficients let us decompose
-mechanically: "tonnage signal contributed +1.6 Mt, seasonal anchor
-pulled back -0.4 Mt". Adds explainability to the headline cards
-without changing the model. Could surface as a tooltip or a small
-sub-section under the cards.
-
-### 7. README polish for first-time readers
-
-**Effort:** ~1 hour. **Why:** current README assumes you know what
-the project does. A short "If you just landed here" intro at the top
-+ a screenshot of the live page would orient new readers in 30
-seconds. Pure documentation; no behavioural change.
-
-### 8. Multi-country extension
+### 8. Multi-country extension *(not started)*
 
 **Effort:** weeks. **Why:** IMF PortWatch covers global ports. Brazil
 iron ore (Vale), Indonesia thermal coal, US LNG export terminals —
@@ -151,34 +90,19 @@ per-country bridges. Worth attempting only if there's appetite for
 turning this into a multi-country product rather than a focused
 Australia tool.
 
-### 9. Conformal-prediction band recalibration
+### 9. Conformal-prediction band recalibration *(not started, low priority)*
 
-**Effort:** ~half day, depends on #3. **Why:** if #3 shows the
-current residual-bootstrap bands are miscalibrated, conformal
-prediction is the principled fix — gives finite-sample coverage
-guarantees that the bootstrap doesn't. Slightly fancier methodology
-swap, but rigorous. Only worth doing if calibration check reveals a
-real problem.
-
-### 10. `OUTPUTS_JSON.md` schema doc
-
-**Effort:** ~30 min. **Why:** `outputs.json` carries a `schema` field
-(`resourcetracker.outputs.v1`) so consumers can guard against future
-changes. A separate `docs/OUTPUTS_JSON.md` documenting the field
-semantics + a stability contract would let external consumers depend
-on it without reading R source. Mostly relevant if the JSON ever gets
-external users.
-
----
-
-**Quick-pick guide:**
-
-- *"I want a sense of accomplishment fast"* → #4 (surface anomalies,
-  1 hour, immediate visual change)
-- *"I want the highest analytical value"* → #1 (DISR-release comparison
-  closes the validation loop the brief asked for)
-- *"I want skill, not polish"* → Plan B above (FRED demand signal)
-- *"Don't do this yet"* → #8 (multi-country, biggest)
+**Effort:** ~half day. **Why:** if calibration check (now shipped as
+#3) shows the residual-bootstrap bands are miscalibrated, conformal
+prediction is the principled fix — finite-sample coverage guarantees
+the bootstrap doesn't provide. **Current status:** empirical coverage
+on production picks is reasonably close to nominal
+(iron_ore/bojo 0.71/0.86, coal_met/midas 0.86/1.00,
+coal_thermal/bojo 0.86/0.86 at the 80/95% bands), so this isn't
+urgent. Re-evaluate if a future production pick lands with materially
+worse coverage. Some non-production specs *are* badly miscalibrated
+(`coal_thermal/lagged` covers 0.29 at 80%); not load-bearing today
+but worth keeping an eye on.
 
 ## Anti-list — things I'd recommend NOT doing
 
@@ -209,6 +133,54 @@ This file is hand-maintained. Mark items as done by moving them under a
 adding a one-liner to the relevant commit message.
 
 ## Completed
+
+### 2026-05-21 (second batch)
+
+Phase-1/2/3 backlog landed in one pass. The briefing now has five new
+sections; `bridge_diagnostics.csv` and `nowcast_current.csv` each
+gained columns; the Shiny dashboard was removed.
+
+- **#1 Automated nowcast-vs-actual comparison.** New "Forecast vs
+  actual — closed quarters" section in the briefing joins
+  `mart_nowcast_history` (h = 0, latest pre-publication run within 42
+  days of quarter close) against `raw_disr_req_quarterly` actuals, then
+  reports per-quarter error and an MAE/MAPE/CI-hit-rate summary per
+  commodity. Closes the validation loop the original
+  `PROJECT_BRIEF.txt` asked for.
+- **#2 Backtest visualization.** New "Backtest — every spec, every
+  quarter" plot in the briefing showing DISR actuals (black) against
+  every candidate spec's point forecast (production pick in blue, the
+  rest faded). Production-pick justification visible at a glance
+  alongside the diagnostics table.
+- **#3 Coverage / calibration check.** New `R/calibration.R` with
+  `backtest_coverage()` — reconstructs the 80/95% bootstrap bands at
+  share_observed = 0 for each backtest quarter and reports empirical
+  hit-rate per spec. Joined into `bridge_diagnostics.csv` as `n_oos`,
+  `coverage_80`, `coverage_95`. New "Band calibration" section in the
+  briefing. Production picks land near nominal.
+- **#4 Anomaly section.** New "Flagged anomalies" block in the
+  briefing showing top-5 |z|-score departures from the seasonal daily
+  norm over the last 28 days, joined to `mart_dim_port` for
+  human-readable port names where available.
+- **#5 Shiny dashboard removed.** `reports/dashboard/app.R` deleted;
+  `shiny` dropped from `DESCRIPTION` Suggests; references scrubbed
+  from `README.md`, `docs/METHODOLOGY.md`, `R/anomalies.R`. The
+  briefing is the canonical view.
+- **#6 WoW decomposition / attribution.** New `R/attribution.R` with
+  `decompose_nowcast()` — mechanically attributes each nowcast to
+  V_{Q-4} + tonnage signal + model anchor adjustment + other
+  regressors. Five new columns on `nowcast_current.csv`. "Why the
+  nowcast says what it says" table renders under the headline cards.
+  Implemented as a *level* decomposition (vs seasonal naive baseline)
+  rather than the WoW state-tracking the brief originally implied —
+  more durable and explainable without needing prior-run feature state.
+- **#7 README polish.** "If you just landed here" intro at the top
+  plus what / how / who / why bullets, plus a quick-links section
+  pointing to the live page, the JSON feed, methodology, roadmap.
+- **#10 `docs/OUTPUTS_JSON.md` schema doc.** Stability contract for
+  the `resourcetracker.outputs.v1` JSON endpoint — every field
+  documented with type / unit / semantics, an example payload, an
+  additive-change-is-non-breaking guarantee, and a versioning policy.
 
 ### 2026-05-20
 

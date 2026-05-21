@@ -16,11 +16,15 @@
 #'   commodity (e.g. `c(iron_ore = "bojo", coal_met = "midas")`). When
 #'   supplied, the matching `(commodity, spec)` row in
 #'   `bridge_diagnostics.csv` is flagged `production_choice = TRUE`.
+#' @param coverage Optional tibble from [backtest_coverage()] with
+#'   `(commodity, spec, n_oos, coverage_80, coverage_95)`. Joined into
+#'   `bridge_diagnostics.csv`.
 #' @return Invisibly, a named character vector of file paths written.
 #' @export
 write_csv_outputs <- function(nowcast_current, portwatch, bridge_fits,
                               backtest_results, cfg,
-                              production_label = NULL) {
+                              production_label = NULL,
+                              coverage         = NULL) {
   out <- cfg$paths$outputs
   fs::dir_create(out)
 
@@ -111,6 +115,15 @@ write_csv_outputs <- function(nowcast_current, portwatch, bridge_fits,
   diagnostics <- fit_diag |>
     dplyr::full_join(oos, by = c("commodity", "spec")) |>
     dplyr::arrange(.data$commodity, .data$spec)
+
+  if (!is.null(coverage) && nrow(coverage) > 0L) {
+    diagnostics <- diagnostics |>
+      dplyr::left_join(coverage, by = c("commodity", "spec"))
+  } else {
+    diagnostics$n_oos       <- NA_integer_
+    diagnostics$coverage_80 <- NA_real_
+    diagnostics$coverage_95 <- NA_real_
+  }
 
   # `production_label` is a named character vector keyed by commodity
   # (e.g. `c(iron_ore = "midas", coal = "equal_avg")`). Mark the row that
