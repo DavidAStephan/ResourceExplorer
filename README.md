@@ -1,14 +1,39 @@
 # resourcetracker
 
-Nowcasts quarterly physical-tonnage exports of Australian **iron ore**
-and **coal** from IMF PortWatch AIS daily tonnage, with the DISR
-Resources & Energy Quarterly (REQ) Table 16 as the truth series.
-Per-commodity bridge regressions feed a current-quarter point estimate
-with bootstrap 80% and 95% bands that shrink as the quarter is observed.
+**Weekly nowcast of Australian iron-ore and coal exports, before the
+official statistics drop.** The Department of Industry publishes
+physical-tonnage exports quarterly with a ~5-week lag. This project
+estimates the current quarter's volume right now, using ship-movement
+data, and republishes every Tuesday.
 
-- **Latest weekly nowcast:** <https://davidastephan.github.io/ResourceExplorer/>
-- Methodology: [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md)
-- Brief: [`PROJECT_BRIEF.txt`](PROJECT_BRIEF.txt)
+> 📊 **[Read the latest nowcast →](https://davidastephan.github.io/ResourceExplorer/)**
+
+### If you just landed here
+
+- **What you get:** a number ("iron ore: 236 Mt, 80% CI 232–239") for
+  the current quarter and the next one, plus the model's track record
+  on prior quarters. Updated weekly.
+- **How:** [IMF PortWatch](https://portwatch.imf.org/) gives daily
+  ship-tonnage by port from AIS. A bridge regression maps that to
+  [DISR REQ Table 16](https://www.industry.gov.au/publications/resources-and-energy-quarterly)
+  physical export volumes. Bootstrap bands shrink as the quarter
+  fills in. Full derivation in [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md).
+- **Who it's for:** anyone who wants a real-time read on Australian
+  bulk-commodity exports — analysts, journalists, traders, the
+  curious. No subscription, no signup.
+- **Why it works:** ~85% of Australian resource exports by volume go
+  on ships visible in public AIS data. Year-on-year changes in port
+  tonnage track year-on-year changes in DISR's reported volumes
+  closely enough to nowcast at ≥30% RMSE reduction vs a seasonal
+  random walk.
+
+### Quick links
+
+- **Live nowcast:** <https://davidastephan.github.io/ResourceExplorer/>
+- **Programmatic feed:** [`/data/outputs.json`](https://davidastephan.github.io/ResourceExplorer/data/outputs.json) (schema: [`docs/OUTPUTS_JSON.md`](docs/OUTPUTS_JSON.md))
+- **Methodology:** [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md)
+- **Roadmap / open items:** [`docs/ROADMAP.md`](docs/ROADMAP.md)
+- **Original brief:** [`PROJECT_BRIEF.txt`](PROJECT_BRIEF.txt)
 
 ---
 
@@ -30,8 +55,8 @@ install.packages(c(
   "purrr", "readr", "readxl", "rlang", "rmarkdown", "stringr",
   "tibble", "tidyr"
 ))
-# Optional (dashboard + tests):
-install.packages(c("knitr", "shiny", "testthat", "withr"))
+# Optional (tests):
+install.packages(c("knitr", "testthat", "withr"))
 ```
 
 ## Running the pipeline
@@ -60,15 +85,6 @@ What it does (see [`run.R`](run.R)):
    `reports/briefing/briefing.html`.
 
 Total runtime target: well under a minute on a warm cache.
-
-## Dashboard
-
-```r
-shiny::runApp("reports/dashboard")
-```
-
-The dashboard reads `outputs/*.csv` and rds tables from
-`data/warehouse/`; always launch from the repo root.
 
 ## Tests
 
@@ -117,7 +133,6 @@ resourcetracker/
 ├── tests/testthat/          # unit + integration tests
 ├── reports/
 │   ├── briefing/briefing.Rmd
-│   ├── dashboard/app.R
 │   └── technical_note/      # methodology write-up
 ├── run.R                    # orchestrator (replaces _targets.R)
 ├── config.R                 # paths, DISR row map, bootstrap config

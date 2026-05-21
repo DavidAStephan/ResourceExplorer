@@ -64,8 +64,8 @@ the following key columns:
 **No explicit seasonal adjustment is applied.** The Δ_4 transforms on
 the RHS (and `bojo`'s LHS) strip deterministic seasonality
 mechanically. STL / X-13 functions exist in `R/seasonal_adjust.R` but
-are no longer called by the bridge; they're available for ad-hoc use
-in the dashboard.
+are no longer called by the bridge; they're kept for ad-hoc
+exploratory use.
 
 This choice matches the closest-analogue literature: Furukawa & Hisano
 (2022, BoJ WP 22-E-19) and Del-Rosario & Quách (2024, AMRO WP) both

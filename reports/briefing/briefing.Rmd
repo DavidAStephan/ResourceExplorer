@@ -85,11 +85,13 @@ safe_read_wh <- function(name) {
   tibble::as_tibble(readRDS(p))
 }
 
-nowcast  <- safe_read_csv(path(outputs, "nowcast_current.csv"))
-tonnage  <- safe_read_csv(path(outputs, "tonnage_quarterly.csv"))
-diag_fit <- safe_read_csv(path(outputs, "bridge_diagnostics.csv"))
-history  <- safe_read_wh("mart_nowcast_history")
-disr     <- safe_read_wh("raw_disr_req_quarterly")
+nowcast   <- safe_read_csv(path(outputs, "nowcast_current.csv"))
+tonnage   <- safe_read_csv(path(outputs, "tonnage_quarterly.csv"))
+diag_fit  <- safe_read_csv(path(outputs, "bridge_diagnostics.csv"))
+history   <- safe_read_wh("mart_nowcast_history")
+disr      <- safe_read_wh("raw_disr_req_quarterly")
+anomalies <- safe_read_wh("mart_latest_anomalies")
+ports_dim <- safe_read_wh("mart_dim_port")
 
 com_levels <- c("iron_ore", "coal_met", "coal_thermal", "coal")
 
@@ -214,6 +216,58 @@ if (nrow(nowcast) == 0) {
 }
 ```
 
+```{r attribution, results='asis'}
+# Mechanical decomposition of each in-quarter nowcast into additive
+# contributions: lag-4 baseline + tonnage signal + lag4 drift +
+# intercept + other regressors (e.g. price for price_aug). Surfaces
+# *why* the nowcast differs from a naive "same quarter last year"
+# benchmark. Source: `decompose_nowcast()` in R/attribution.R.
+attr_cols <- c("v_lag4_Mt", "tonnage_signal_Mt", "lag4_drift_Mt",
+               "intercept_Mt", "other_Mt")
+if (nrow(nowcast) > 0 && all(attr_cols %in% names(nowcast))) {
+  attr_h0 <- nowcast |>
+    dplyr::filter(horizon == 0L, !is.na(v_lag4_Mt))
+  if (nrow(attr_h0) > 0) {
+    fmt_signed_mt <- function(x) {
+      if (!is.finite(x)) return("—")
+      sprintf(if (x >= 0) "+%.1f" else "%.1f", x)
+    }
+    rows <- attr_h0 |>
+      dplyr::mutate(
+        commodity     = factor(commodity, levels = com_levels),
+        anchor_adj_Mt = intercept_Mt + lag4_drift_Mt
+      ) |>
+      dplyr::arrange(commodity) |>
+      dplyr::transmute(
+        commodity   = vapply(as.character(commodity), commodity_label,
+                             character(1)),
+        `last year (V_{Q-4})` = sprintf("%.1f Mt", v_lag4_Mt),
+        `tonnage signal`      = vapply(tonnage_signal_Mt, fmt_signed_mt,
+                                       character(1)),
+        `model anchor adj.`   = vapply(anchor_adj_Mt,     fmt_signed_mt,
+                                       character(1)),
+        `other`               = vapply(other_Mt,          fmt_signed_mt,
+                                       character(1)),
+        `= nowcast`           = sprintf("%.1f Mt", point_estimate_Mt)
+      )
+    cat('<h3 style="margin-top:1.5rem">Why the nowcast says what it says</h3>\n')
+    cat('<p style="color:var(--text-muted);max-width:680px;margin:0 0 0.75rem">',
+        'Each headline above broken into additive contributions vs the',
+        'seasonal-naive baseline (same quarter last year). All values',
+        'in Mt; rows sum to the nowcast up to a small non-linearity in',
+        '<code>exp(Δlog) − 1</code>.',
+        '"Model anchor adj." combines the intercept and the lag-4',
+        'coefficient drift &mdash; effectively zero for <code>bojo</code>',
+        'specs (which impose β<sub>4</sub> = 1), small for the others.',
+        '"Other" fires only when a price-augmented spec wins production',
+        'for a commodity.',
+        '</p>\n')
+    print(knitr::kable(rows, format = "html", escape = FALSE,
+                       table.attr = 'class="attribution-table"'))
+  }
+}
+```
+
 ```{r next-quarter, results='asis'}
 # Next-quarter forecast (h = 1) -- pure seasonal forecast for unobserved
 # tonnage, fed through the same bridge. Much wider error bars by
@@ -304,6 +358,173 @@ if (nrow(disr) > 0 && nrow(nowcast) > 0) {
 }
 ```
 
+## Forecast vs actual — closed quarters
+
+```{r forecast-vs-actual, results='asis'}
+# For each commodity × quarter that DISR has now published, find the
+# *final pre-publication* nowcast (the latest h=0 run we made before
+# DISR's release ~5 weeks after quarter close) and report the error.
+# This closes the validation loop the project brief asked for:
+#   "When March 2026 ITG is released by ABS in early May, I can
+#    compare my April 1 nowcast to the ABS actual."
+DISR_LAG_DAYS <- 42L  # DISR REQ T16 releases ~5-6 weeks after quarter close
+
+if (nrow(history) == 0 || nrow(disr) == 0) {
+  cat("*No closed quarters with prior nowcasts to compare yet.*\n")
+} else {
+  hist_h0 <- history |>
+    dplyr::mutate(
+      run_timestamp = as.POSIXct(run_timestamp),
+      quarter_end   = as.Date(quarter_end),
+      horizon       = dplyr::coalesce(as.integer(horizon), 0L)
+    ) |>
+    dplyr::filter(horizon == 0L)
+
+  actuals <- disr |>
+    dplyr::mutate(quarter_end = as.Date(quarter_end)) |>
+    dplyr::transmute(commodity, quarter_end, actual_Mt = tonnes_Mt)
+
+  # For each (commodity, quarter_end), keep the last nowcast whose run
+  # landed within DISR_LAG_DAYS of quarter close — i.e., the call made
+  # while the quarter was fresh but before the official number was out.
+  joined <- hist_h0 |>
+    dplyr::inner_join(actuals, by = c("commodity", "quarter_end")) |>
+    dplyr::mutate(
+      days_after_qend = as.numeric(difftime(as.Date(run_timestamp),
+                                            quarter_end, units = "days"))
+    ) |>
+    dplyr::filter(days_after_qend <= DISR_LAG_DAYS) |>
+    dplyr::arrange(commodity, quarter_end, dplyr::desc(run_timestamp)) |>
+    dplyr::group_by(commodity, quarter_end) |>
+    dplyr::slice(1) |>
+    dplyr::ungroup() |>
+    dplyr::filter(quarter_end < Sys.Date())  # only closed quarters
+
+  if (nrow(joined) == 0) {
+    cat(sprintf(
+      "*No closed quarters with a prior in-window nowcast yet. Comparisons appear here once a quarter we nowcasted within %d days of close has been published by DISR.*\n",
+      DISR_LAG_DAYS
+    ))
+  } else {
+    joined |>
+      dplyr::mutate(
+        commodity   = factor(commodity, levels = com_levels),
+        nowcast_Mt  = round(point_estimate, 1),
+        actual_Mt_r = round(actual_Mt, 1),
+        error_Mt    = round(point_estimate - actual_Mt, 2),
+        error_pct   = round(100 * (point_estimate - actual_Mt) / actual_Mt, 1),
+        inside_80   = ifelse(actual_Mt >= lower_80 & actual_Mt <= upper_80,
+                             "yes", "no"),
+        inside_95   = ifelse(actual_Mt >= lower_95 & actual_Mt <= upper_95,
+                             "yes", "no")
+      ) |>
+      dplyr::arrange(commodity, quarter_end) |>
+      dplyr::select(commodity, quarter_end,
+                    `nowcast (Mt)` = nowcast_Mt,
+                    `actual (Mt)`  = actual_Mt_r,
+                    `error (Mt)`   = error_Mt,
+                    `error (%)`    = error_pct,
+                    `in 80% CI`    = inside_80,
+                    `in 95% CI`    = inside_95) |>
+      knitr::kable(
+        caption = paste(
+          "Forecast accuracy on quarters that have closed and been",
+          "published by DISR. Each row is the last nowcast we made for",
+          sprintf("that quarter within %d days of close — i.e., the",
+                  DISR_LAG_DAYS),
+          "call we'd have stood behind before the official number landed.",
+          "`error = nowcast - actual` (Mt and %)."
+        )
+      )
+
+    # Per-commodity summary: count, mean abs error, hit-rate at 80/95.
+    summary_df <- joined |>
+      dplyr::group_by(commodity) |>
+      dplyr::summarise(
+        n          = dplyr::n(),
+        mae_Mt     = mean(abs(point_estimate - actual_Mt)),
+        mape_pct   = 100 * mean(abs(point_estimate - actual_Mt) / actual_Mt),
+        hit_80_pct = 100 * mean(actual_Mt >= lower_80 & actual_Mt <= upper_80),
+        hit_95_pct = 100 * mean(actual_Mt >= lower_95 & actual_Mt <= upper_95),
+        .groups    = "drop"
+      ) |>
+      dplyr::mutate(
+        commodity  = factor(commodity, levels = com_levels),
+        mae_Mt     = round(mae_Mt, 2),
+        mape_pct   = round(mape_pct, 1),
+        hit_80_pct = round(hit_80_pct, 0),
+        hit_95_pct = round(hit_95_pct, 0)
+      ) |>
+      dplyr::arrange(commodity)
+
+    summary_df |>
+      dplyr::select(commodity,
+                    `n (quarters)` = n,
+                    `MAE (Mt)`     = mae_Mt,
+                    `MAPE (%)`     = mape_pct,
+                    `80% CI hit-rate (%)` = hit_80_pct,
+                    `95% CI hit-rate (%)` = hit_95_pct) |>
+      knitr::kable(
+        caption = paste(
+          "Per-commodity summary across the closed-quarter sample above.",
+          "Hit-rates should approach the nominal band coverage (80 / 95%)",
+          "if the bootstrap bands are well-calibrated — see the",
+          "calibration section below for the formal check."
+        )
+      )
+  }
+}
+```
+
+## Band calibration
+
+```{r calibration, results='asis'}
+# Empirical coverage of the bootstrap 80/95% bands when reconstructed
+# at share_observed = 0 for each backtest quarter (computed by
+# `backtest_coverage()` and joined into bridge_diagnostics.csv).
+# We compare against the nominal 80 and 95% targets. Material gaps
+# point at residual-bootstrap miscalibration — the principled fix is
+# conformal prediction (see docs/ROADMAP.md backlog #9).
+cov_cols <- c("coverage_80", "coverage_95")
+if (nrow(diag_fit) > 0 && all(cov_cols %in% names(diag_fit))) {
+  cal <- diag_fit |>
+    dplyr::filter(!is.na(coverage_80) | !is.na(coverage_95)) |>
+    dplyr::transmute(
+      commodity   = factor(commodity, levels = com_levels),
+      spec,
+      n_oos,
+      coverage_80,
+      coverage_95,
+      production  = ifelse(isTRUE(production_choice) |
+                           production_choice %in% c("TRUE","true"),
+                           "★", "")
+    ) |>
+    dplyr::arrange(commodity, spec)
+  if (nrow(cal) == 0) {
+    cat("*No coverage data yet — needs at least one backtest quarter per spec.*\n")
+  } else {
+    cal |>
+      dplyr::mutate(
+        `coverage 80% (target 0.80)` = sprintf("%.2f", coverage_80),
+        `coverage 95% (target 0.95)` = sprintf("%.2f", coverage_95)
+      ) |>
+      dplyr::select(`★` = production, commodity, spec,
+                    `n (OOS)` = n_oos,
+                    `coverage 80% (target 0.80)`,
+                    `coverage 95% (target 0.95)`) |>
+      knitr::kable(
+        caption = paste(
+          "Empirical band coverage on backtest quarters, reconstructed",
+          "at share_observed = 0 (full residual bootstrap, no in-quarter",
+          "shrink). Well-calibrated bands produce values near 0.80 and",
+          "0.95. Combination specs (`equal_avg`, `inv_mse`) lack a",
+          "single lm fit and are omitted."
+        )
+      )
+  }
+}
+```
+
 ## Bridge diagnostics
 
 ```{r diagnostics}
@@ -356,6 +577,65 @@ if (nrow(diag_fit) > 0) {
         "`RMSE/naive` < 1 means the spec beats the seasonal random walk."
       )
     )
+}
+```
+
+## Backtest — every spec, every quarter
+
+```{r backtest-viz, fig.width=9, fig.height=4.5}
+# Per-commodity walk-forward backtest: actuals plotted against every
+# candidate spec's point forecast for each validation quarter. The
+# production-deployed spec is emphasised; the others are faded so the
+# choice is visible at a glance.
+backtest_rds <- safe_read_wh("derived_backtest_results")
+prod_picks <- if (nrow(diag_fit) > 0 && "production_choice" %in% names(diag_fit)) {
+  diag_fit |>
+    dplyr::mutate(production_choice = as.character(production_choice)) |>
+    dplyr::filter(production_choice %in% c("TRUE","true")) |>
+    dplyr::select(commodity, prod_spec = spec)
+} else tibble::tibble(commodity = character(), prod_spec = character())
+
+if (nrow(backtest_rds) > 0) {
+  bt <- backtest_rds |>
+    dplyr::mutate(
+      commodity   = factor(commodity, levels = com_levels),
+      quarter_end = as.Date(quarter_end)
+    ) |>
+    dplyr::filter(!is.na(point_estimate)) |>
+    dplyr::left_join(prod_picks, by = "commodity") |>
+    dplyr::mutate(is_production = !is.na(prod_spec) & spec == prod_spec)
+
+  actuals_bt <- bt |>
+    dplyr::distinct(commodity, quarter_end, actual)
+
+  ggplot() +
+    geom_line(data = actuals_bt,
+              aes(quarter_end, actual),
+              colour = .palette$text, linewidth = 0.7) +
+    geom_point(data = actuals_bt,
+               aes(quarter_end, actual),
+               colour = .palette$text, size = 1.6) +
+    geom_line(data = dplyr::filter(bt, !is_production),
+              aes(quarter_end, point_estimate, group = spec),
+              colour = .palette$text_muted, alpha = 0.35, linewidth = 0.4) +
+    geom_line(data = dplyr::filter(bt, is_production),
+              aes(quarter_end, point_estimate),
+              colour = .palette$accent, linewidth = 1.0) +
+    geom_point(data = dplyr::filter(bt, is_production),
+               aes(quarter_end, point_estimate),
+               colour = .palette$accent, size = 2.2) +
+    facet_wrap(~ commodity, scales = "free_y",
+               labeller = labeller(commodity = .commodity_labels)) +
+    labs(x = NULL, y = "Quarterly exports (Mt)",
+         title = "Walk-forward backtest: actuals vs candidate forecasts",
+         subtitle = "Black: DISR actual. Blue: production-deployed spec. Grey: non-winning candidate specs (every backtest quarter, every spec).",
+         caption = paste(
+           "Each validation quarter refits every candidate on the",
+           "expanding training window ending one quarter before, then",
+           "predicts the held-out quarter. The production spec is the",
+           "one with the lowest RMSE across this sample (see the",
+           "diagnostics table above)."
+         ))
 }
 ```
 
@@ -457,6 +737,42 @@ if (nrow(nowcast_h0) == 0 || nrow(delta) == 0) {
     select(commodity, quarter_end, prior_Mt, now_Mt, delta_Mt, delta_pct,
            hours_since) |>
     knitr::kable(caption = "Same-quarter run-over-run delta. Drops rows for any commodity whose current quarter has no prior nowcast.")
+}
+```
+
+## Flagged anomalies
+
+```{r anomalies, results='asis'}
+# Top 5 departures >2σ from the seasonal daily norm over the last 28
+# days, sourced from `mart_latest_anomalies`. Port id resolves to a human
+# name via `mart_dim_port` when available; we keep the raw id otherwise
+# (synthetic fixtures use `portNNN` placeholders that have no metadata).
+if (nrow(anomalies) == 0) {
+  cat("*No departures >2σ from the seasonal norm in the last 28 days.*\n")
+} else {
+  port_name_lookup <- if (nrow(ports_dim) > 0 && "port_id" %in% names(ports_dim)) {
+    stats::setNames(ports_dim$port_name, ports_dim$port_id)
+  } else character()
+  anomalies |>
+    dplyr::arrange(dplyr::desc(abs(z_score))) |>
+    dplyr::slice_head(n = 5) |>
+    dplyr::mutate(
+      port      = dplyr::coalesce(port_name_lookup[port_id], port_id),
+      commodity = factor(commodity, levels = com_levels),
+      `tonnage (kt)`  = round(tonnage  / 1e3, 0),
+      `expected (kt)` = round(expected / 1e3, 0),
+      `z`             = round(z_score, 2)
+    ) |>
+    dplyr::select(date = obs_date, port, commodity,
+                  `tonnage (kt)`, `expected (kt)`, z) |>
+    knitr::kable(
+      caption = paste(
+        "Largest |z|-score departures from the seasonal daily norm",
+        "(±7-day window) in the last 28 days. Seasonal norm is built",
+        "from training-window observations only; z > 0 is unusually",
+        "busy, z < 0 unusually quiet."
+      )
+    )
 }
 ```
 
