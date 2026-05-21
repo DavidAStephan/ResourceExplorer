@@ -33,10 +33,16 @@ bulk of the question being asked.
 |---|---|---|---|
 | IMF PortWatch (ArcGIS FeatureServer) | AUS port AIS tonnage by commodity | Daily | RHS indicator |
 | DISR Resources & Energy Quarterly, Table 16 (kt / Mt) | Per-commodity physical export volume | Quarterly | **LHS target** |
+| World Bank Pink Sheet (xlsx) | Iron-ore CFR spot, Newcastle thermal coal | Monthly | RHS (price_aug) |
+| FRED (Federal Reserve Bank of St. Louis API) | `CHNLOLITOAASTSAM` (OECD China CLI) → iron_ore; `XTEXVA01CNM667S` (China exports value) → coal_thermal | Monthly | RHS (demand_aug) |
 | `inst/extdata/ports_metadata.csv` | Hand-curated port → commodity-bucket map | Static | Joins PortWatch ports to commodity buckets |
 
-No FRED / ABS APIs are called any more. The pipeline runs with no API
-keys.
+PortWatch, DISR, and the World Bank Pink Sheet are public endpoints
+that require no key. FRED requires a free API key — set via the
+`FRED_API_KEY` env var (see `.Renviron.example`). When the FRED key is
+unset the pipeline still runs end-to-end; the bench just drops the
+`demand_aug` candidate per commodity automatically via
+`fit_bridge_one`'s NA / min_n guardrails.
 
 **PortWatch processing.** The IMF FeatureServer exposes raw daily
 export tonnage by vessel type per port. We attach each port to its
@@ -125,6 +131,36 @@ Our specs are nested: `bojo ⊂ aggregate ⊂ midas` in terms of
 parameter count. The bench lets the data tell us which level of
 flexibility is justified, with a Wald test (`β_lag4 = 1`) reported in
 `bridge_diagnostics.csv` as a complementary check.
+
+### 4.5 Augmented specs (`lagged`, `price_aug`, `demand_aug`)
+
+Three extension candidates extend the aggregate spec with one
+additional regressor each, testing whether information beyond
+current-quarter PortWatch tonnage adds predictive power:
+
+- **`lagged`** — adds `yoy_log_tonnage_lag1` (one-quarter-lagged YoY
+  tonnage). Tests the Adland-Jia-Strandenes (2017) hypothesis that
+  AIS leads customs-cleared trade by several weeks.
+- **`price_aug`** — adds `yoy_log_price` from the World Bank Pink
+  Sheet (iron-ore CFR spot for `iron_ore`; Newcastle thermal coal
+  for both coal sub-commodities). Tests whether the price signal
+  carries information beyond what tonnage already implies.
+- **`demand_aug`** — adds `yoy_log_demand_*` from FRED. iron_ore picks
+  up the OECD Composite Leading Indicator for China; coal_thermal
+  picks up China's monthly merchandise exports value. Adds a
+  *demand-side* regressor with an independent release calendar from
+  PortWatch, on the Stock-Watson (2004) rationale that forecast-
+  combination gains are largest when candidates draw on different
+  information. `coal_met` deliberately has no FRED series in this
+  pass — overfit risk at N ≈ 23 / k. The RHS is auto-pruned
+  per commodity in `fit_bridge_one`: each commodity gets only the
+  series mapped to it, and a commodity with no series at all is
+  skipped automatically.
+
+When an augmented spec wins production for a commodity, the briefing's
+production-equation section renders with the augmented coefficients;
+when it doesn't, the spec stays in the bench as diagnostic info via
+the OOS leaderboard (same pattern across all augmentations).
 
 ## 5. Forecast combination
 

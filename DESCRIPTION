@@ -31,6 +31,7 @@ Imports:
     tibble,
     tidyr
 Suggests:
+    fredr,
     knitr,
     lintr,
     testthat (>= 3.0.0),

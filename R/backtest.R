@@ -111,7 +111,13 @@ backtest_one_quarter <- function(q, features, commodities, candidates, cfg) {
         return(empty_row)
       }
       info <- spec_info(spec)
-      required <- c(info$rhs, info$predict_extra)
+      # Pull the actual regressors used by THIS fit (not the static
+      # spec_info$rhs) so we don't trip on regressors the fit-time
+      # auto-prune removed (e.g. `demand_aug` drops the FRED column
+      # not mapped to this commodity, and the pred row's NA in that
+      # column would falsely reject an otherwise-fittable quarter).
+      fit_terms <- attr(stats::terms(fits[[key]]$fit), "term.labels")
+      required  <- unique(c(fit_terms, info$predict_extra))
       if (any(is.na(pred_row[1, required]))) {
         return(empty_row)
       }

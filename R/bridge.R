@@ -102,6 +102,33 @@ fit_bridge_one <- function(features, cfg, com, spec,
     dplyr::filter(.data$commodity == com,
                   .data$quarter_end <= train_end) |>
     dplyr::arrange(.data$quarter_end)
+
+  # Auto-prune RHS columns that are entirely NA *for this commodity*
+  # (e.g. demand_aug lists every wired FRED series in `info$rhs`, but
+  # iron_ore only has the CLI series and coal_thermal only has the
+  # exports series). Without pruning, the all-NA column would knock
+  # every row out of `complete.cases` below. We do this only for
+  # demand_aug; other specs depend on every listed regressor.
+  if (spec == "demand_aug") {
+    all_na <- vapply(info$rhs,
+                     function(v) all(is.na(dat[[v]])),
+                     logical(1))
+    if (any(all_na)) {
+      kept <- info$rhs[!all_na]
+      log_info("fit_bridge[%s/%s]: pruning all-NA regressor(s) %s",
+               com, spec, paste(info$rhs[all_na], collapse = ", "))
+      info$rhs <- kept
+      required_cols <- c(info$lhs, kept, info$predict_extra)
+    }
+    # If every demand regressor was pruned, the spec collapses to the
+    # aggregate spec -- skip rather than re-fit a duplicate.
+    if (!any(grepl("^yoy_log_demand_", info$rhs))) {
+      log_info("fit_bridge[%s/%s]: no demand regressors after prune -- skipping",
+               com, spec)
+      return(NULL)
+    }
+  }
+
   dat <- dat[stats::complete.cases(dat[, required_cols, drop = FALSE]),
              , drop = FALSE]
 
@@ -203,6 +230,18 @@ spec_info <- function(spec) {
       # already implies about export volumes.
       lhs = "log_volume",
       rhs = c("yoy_log_tonnage", "yoy_log_price", "log_volume_lag4"),
+      predict_extra = character(),
+      to_log_volume = function(yhat, pred_row) yhat
+    ),
+    demand_aug = list(
+      # Aggregate spec augmented with a YoY China-demand indicator term
+      # from FRED. RHS lists every wired FRED series; per-commodity
+      # NA-only columns are auto-pruned in `fit_bridge_one`, so iron_ore
+      # ends up fit on `yoy_log_demand_cli` and coal_thermal on
+      # `yoy_log_demand_exports` without a separate spec for each.
+      lhs = "log_volume",
+      rhs = c("yoy_log_tonnage", "yoy_log_demand_cli",
+              "yoy_log_demand_exports", "log_volume_lag4"),
       predict_extra = character(),
       to_log_volume = function(yhat, pred_row) yhat
     ),

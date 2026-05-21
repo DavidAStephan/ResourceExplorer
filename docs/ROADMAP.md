@@ -8,11 +8,10 @@ that would extend the system but aren't on the immediate path.
 ## Open / future
 
 > **Detailed plans available:**
-> - China demand indicator (the next-up item): [`docs/PLAN_CHINA_DEMAND.md`](PLAN_CHINA_DEMAND.md)
 > - LNG re-scope (deferred indefinitely): [`docs/PLAN_LNG_AND_DEMAND.md`](PLAN_LNG_AND_DEMAND.md) § Plan A
 >
-> The notes below summarise; the plan docs are what to read before
-> committing time.
+> The China demand-indicator work has shipped — see the Completed
+> section below.
 
 ### Deeper external demand signal
 
@@ -133,6 +132,35 @@ This file is hand-maintained. Mark items as done by moving them under a
 adding a one-liner to the relevant commit message.
 
 ## Completed
+
+### 2026-05-21 (third batch — China demand)
+
+- **China demand indicator via FRED**, per [`docs/PLAN_CHINA_DEMAND.md`](PLAN_CHINA_DEMAND.md).
+  - New `R/ingest_fred.R` (`fetch_fred_demand`) ingests two China
+    demand series via `fredr`:
+    - `CHNLOLITOAASTSAM` (OECD Composite Leading Indicator) →
+      `iron_ore`
+    - `XTEXVA01CNM667S` (China merchandise exports, USD) →
+      `coal_thermal`
+  - `coal_met` deliberately has no FRED series mapped in this pass.
+  - The originally-proposed series (`CHNPRMNTO01IXOBSAM`,
+    `CHNPIEAEN01GPSAM`) turned out to be retired — the Phase-0
+    verification step in the plan caught this and substitute IDs were
+    locked.
+  - New `demand_aug` candidate spec joins the bench. RHS is
+    per-commodity (auto-pruned by `fit_bridge_one` from the static
+    full list).
+  - Workflow now passes the `FRED_API_KEY` secret to the pipeline
+    step. When the key is unset (fork builds, offline dev) the ingest
+    short-circuits and the bench drops `demand_aug` per commodity
+    automatically — no behavioural change to the public-data-only
+    branch of the codebase.
+  - **Outcome on the current sample:** `demand_aug` didn't win
+    production for any commodity (iron_ore/demand_aug ratio 0.82 vs
+    bojo 0.78; coal_thermal/demand_aug 1.27 worse-than-naive). Per
+    the plan's rollback contract, the spec stays in the bench as
+    diagnostic info — matches the `price_aug` precedent. Combinations
+    weren't materially shifted either.
 
 ### 2026-05-21 (second batch)
 

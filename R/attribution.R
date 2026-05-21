@@ -119,7 +119,9 @@ decompose_components <- function(pm, pred_row) {
       if (is.null(x) || is.na(x)) 0 else unname(co[[t]]) * x
     }, numeric(1)))
 
-    # Non-tonnage external regressors: yoy_log_price for price_aug.
+    # Non-tonnage external regressors: yoy_log_price for price_aug,
+    # yoy_log_demand_* for demand_aug. Bucketed together as "other"
+    # because the briefing renders a single "other" column.
     other_terms <- setdiff(names(co),
                            c("(Intercept)", "log_volume_lag4", tonnage_terms))
     other_log <- sum(vapply(other_terms, function(t) {

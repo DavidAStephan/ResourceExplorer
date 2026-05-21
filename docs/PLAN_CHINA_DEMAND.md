@@ -39,22 +39,31 @@ series. Use off-the-shelf FRED aggregates.
 These are the only blockers. Each has a recommended default; explicitly
 override here before kicking off Phase 0.
 
-### 1. The three FRED series
+### 1. The two FRED series *(locked 2026-05-21 after Phase-0 probe)*
 
-| series id | label | maps to | recommendation |
+| series id | label | maps to | status |
 |---|---|---|---|
-| `CHNPRMNTO01IXOBSAM` | China — crude steel production (index, SA) | `iron_ore` | ✅ default |
-| `CHNPIEAEN01GPSAM` | China — electricity production (index, SA) | `coal_thermal` | ✅ default |
-| `BDIY` *(not in FRED)* | Baltic Dry Index | both coal commodities + iron_ore | ❌ **drop** — BDI isn't on FRED at the daily/monthly granularity we need. Use OECD's `CCUSMA02CNQ659N` (China industrial production) as a third signal mapping to `coal_met` instead, or skip the third series entirely on this pass. |
+| `CHNLOLITOAASTSAM` | OECD Composite Leading Indicator (amplitude-adjusted) for China | `iron_ore` | ✅ live, monthly, SA, current to 2026-04 |
+| `XTEXVA01CNM667S` | China International Merchandise Exports (value, USD) | `coal_thermal` | ✅ live, monthly, SA, current to 2026-03 |
 
-**Recommended pick:** start with two series (`steel`, `electricity`) —
-adding more dimensions at N ≈ 23 training quarters risks overfitting
-even with regularised combination weights. We can add a third later
-without changing the schema. Drop BDI from scope.
+`coal_met` is deliberately left without a FRED series in this pass —
+matches the plan's "two series, three commodities" framing. Adding a
+metallurgical-coal-specific signal would push us past N ≈ 23 / k risk
+without an obvious candidate that's both live and conceptually
+appropriate.
 
-> **Verify the series IDs are still live** before committing to them.
-> FRED occasionally retires or rebases OECD-sourced series. Use
-> `fredr::fredr_series("CHNPRMNTO01IXOBSAM")` to confirm.
+**Why these, not the originals.** The Phase-0 verification (run
+2026-05-21) found that the originally-proposed series
+`CHNPRMNTO01IXOBSAM` (China crude steel) and `CHNPIEAEN01GPSAM` (China
+electricity) — and most of the related OECD-sourced FRED endpoints for
+China — have been retired or stopped updating in late 2023 / early
+2024. The two substitutes above were chosen because they (a) update
+monthly to a current observation, (b) are off-the-shelf aggregates
+(not custom constructions), and (c) are conceptually defensible: CLI is
+a broad forward-looking activity index for China, which drives iron
+ore via steel demand; China's export value is a proxy for the
+manufacturing throughput that drives electricity demand and therefore
+thermal coal.
 
 ### 2. Key handling
 
