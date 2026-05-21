@@ -72,6 +72,114 @@ constraint. If the constraint relaxes, the work is roughly:
 Until then, the iron-ore + coal_met + coal_thermal panel is the live
 scope.
 
+## Backlog — newly identified (2026-05-21 review)
+
+Items surfaced by a fresh pass over the project after Tier 4 landed.
+Ordered roughly by ROI. None of these are blocking; pick what's
+interesting.
+
+### 1. Automated nowcast-vs-actual comparison when DISR publishes
+
+**Effort:** ~4 hours. **Why:** the original `PROJECT_BRIEF.txt` called
+this out explicitly — *"When March 2026 ITG is released by ABS in
+early May, I can compare my April 1 nowcast to the ABS actual and
+quantify the forecast error"*. The pieces are already in place:
+`mart_nowcast_history` has every past nowcast keyed by
+`(commodity, quarter_end, run_timestamp)`; the weekly pipeline detects
+fresh DISR releases via the ingest layer; the only missing piece is a
+briefing chunk that joins prior-quarter nowcasts to the just-released
+actual and shows per-commodity forecast error. Closes the validation
+loop on the live page.
+
+### 2. Backtest visualization in the briefing
+
+**Effort:** ~2 hours. **Why:** the "Bridge diagnostics" section
+currently reports OOS RMSE in a table. A per-commodity actuals-vs-
+forecast time-series chart (production spec highlighted; non-winning
+specs shown faded) would make model skill visible at a glance. Sits
+naturally below the existing diagnostics table.
+
+### 3. Coverage / calibration check
+
+**Effort:** ~3 hours. **Why:** we publish 80% and 95% CIs but never
+verify they're calibrated — empirical coverage on the validation set
+could easily be 60% or 99%. Compute "fraction of held-out actuals
+inside the band" per commodity per band, add to
+`bridge_diagnostics.csv`, surface in the briefing diagnostics table.
+If miscalibrated, document or adjust (see #9 below).
+
+### 4. Surface the anomaly detection in the briefing
+
+**Effort:** ~1 hour. **Why:** `R/anomalies.R` produces
+`mart_latest_anomalies` already, but the briefing never references it.
+The methodology doc claims a "Flagged anomalies (departures >2σ from
+seasonal norm)" section that doesn't exist. One-shot fix: read the
+table, render the top 5 anomalies as a small block in the briefing.
+
+### 5. Verify (or remove) the Shiny dashboard
+
+**Effort:** ~1-2 hours. **Why:** `reports/dashboard/app.R` hasn't been
+touched since the scope narrowed and the schema changed (added
+`horizon`, split coal). Almost certainly broken against current data.
+Either fix it to current schema or delete the file and the
+`shiny` Suggests dep.
+
+### 6. WoW decomposition / attribution
+
+**Effort:** ~3 hours. **Why:** the headline shows "Iron ore +1.2 Mt
+WoW" but not *why*. The bridge coefficients let us decompose
+mechanically: "tonnage signal contributed +1.6 Mt, seasonal anchor
+pulled back -0.4 Mt". Adds explainability to the headline cards
+without changing the model. Could surface as a tooltip or a small
+sub-section under the cards.
+
+### 7. README polish for first-time readers
+
+**Effort:** ~1 hour. **Why:** current README assumes you know what
+the project does. A short "If you just landed here" intro at the top
++ a screenshot of the live page would orient new readers in 30
+seconds. Pure documentation; no behavioural change.
+
+### 8. Multi-country extension
+
+**Effort:** weeks. **Why:** IMF PortWatch covers global ports. Brazil
+iron ore (Vale), Indonesia thermal coal, US LNG export terminals —
+same methodology applies. Real capability expansion but a much bigger
+project: needs a country-aware data model refactor (config, ports
+metadata, DISR-equivalent target series per country), then
+per-country bridges. Worth attempting only if there's appetite for
+turning this into a multi-country product rather than a focused
+Australia tool.
+
+### 9. Conformal-prediction band recalibration
+
+**Effort:** ~half day, depends on #3. **Why:** if #3 shows the
+current residual-bootstrap bands are miscalibrated, conformal
+prediction is the principled fix — gives finite-sample coverage
+guarantees that the bootstrap doesn't. Slightly fancier methodology
+swap, but rigorous. Only worth doing if calibration check reveals a
+real problem.
+
+### 10. `OUTPUTS_JSON.md` schema doc
+
+**Effort:** ~30 min. **Why:** `outputs.json` carries a `schema` field
+(`resourcetracker.outputs.v1`) so consumers can guard against future
+changes. A separate `docs/OUTPUTS_JSON.md` documenting the field
+semantics + a stability contract would let external consumers depend
+on it without reading R source. Mostly relevant if the JSON ever gets
+external users.
+
+---
+
+**Quick-pick guide:**
+
+- *"I want a sense of accomplishment fast"* → #4 (surface anomalies,
+  1 hour, immediate visual change)
+- *"I want the highest analytical value"* → #1 (DISR-release comparison
+  closes the validation loop the brief asked for)
+- *"I want skill, not polish"* → Plan B above (FRED demand signal)
+- *"Don't do this yet"* → #8 (multi-country, biggest)
+
 ## Anti-list — things I'd recommend NOT doing
 
 Documenting these so they don't quietly bubble up as "we should also…"
