@@ -3661,6 +3661,142 @@
       "Author": "Gábor Csárdi [aut, cre], Kuba Podgórski [ctb], Rich Geldreich [ctb], Posit Software, PBC [cph, fnd] (ROR: <https://ror.org/03wc8by49>)",
       "Maintainer": "Gábor Csárdi <csardi.gabor@gmail.com>",
       "Repository": "CRAN"
+    },
+    "readabs": {
+      "Package": "readabs",
+      "Version": "0.4.30",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "readxl",
+        "dplyr",
+        "hutils",
+        "fst",
+        "purrr",
+        "tidyr",
+        "stringi",
+        "tools",
+        "glue",
+        "httr",
+        "rvest",
+        "xml2",
+        "rlang",
+        "labelled"
+      ]
+    },
+    "fst": {
+      "Package": "fst",
+      "Version": "0.9.8",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "fstcore",
+        "Rcpp"
+      ]
+    },
+    "fstcore": {
+      "Package": "fstcore",
+      "Version": "0.10.0",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "Rcpp"
+      ]
+    },
+    "fastmatch": {
+      "Package": "fastmatch",
+      "Version": "1.1-8",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": []
+    },
+    "hutils": {
+      "Package": "hutils",
+      "Version": "2.0.0",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "data.table",
+        "magrittr",
+        "stats",
+        "utils",
+        "fastmatch",
+        "grDevices"
+      ]
+    },
+    "labelled": {
+      "Package": "labelled",
+      "Version": "2.16.0",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "haven",
+        "cli",
+        "dplyr",
+        "lifecycle",
+        "rlang",
+        "vctrs",
+        "stringr",
+        "tidyr",
+        "tidyselect"
+      ]
+    },
+    "haven": {
+      "Package": "haven",
+      "Version": "2.5.5",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "cli",
+        "forcats",
+        "hms",
+        "lifecycle",
+        "methods",
+        "readr",
+        "rlang",
+        "tibble",
+        "tidyselect",
+        "vctrs"
+      ]
+    },
+    "rvest": {
+      "Package": "rvest",
+      "Version": "1.0.5",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "cli",
+        "glue",
+        "httr",
+        "lifecycle",
+        "magrittr",
+        "rlang",
+        "selectr",
+        "tibble",
+        "xml2"
+      ]
+    },
+    "xml2": {
+      "Package": "xml2",
+      "Version": "1.5.2",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "cli",
+        "methods",
+        "rlang"
+      ]
+    },
+    "selectr": {
+      "Package": "selectr",
+      "Version": "0.5-1",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "methods",
+        "stringr",
+        "R6"
+      ]
     }
   }
 }
