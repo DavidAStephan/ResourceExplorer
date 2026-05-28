@@ -85,9 +85,10 @@ safe_read_wh <- function(name) {
   tibble::as_tibble(readRDS(p))
 }
 
-nowcast   <- safe_read_csv(path(outputs, "nowcast_current.csv"))
-tonnage   <- safe_read_csv(path(outputs, "tonnage_quarterly.csv"))
-diag_fit  <- safe_read_csv(path(outputs, "bridge_diagnostics.csv"))
+nowcast    <- safe_read_csv(path(outputs, "nowcast_current.csv"))
+chain_vol  <- safe_read_csv(path(outputs, "nowcast_chain_vol.csv"))
+tonnage    <- safe_read_csv(path(outputs, "tonnage_quarterly.csv"))
+diag_fit   <- safe_read_csv(path(outputs, "bridge_diagnostics.csv"))
 history   <- safe_read_wh("mart_nowcast_history")
 disr      <- safe_read_wh("raw_disr_req_quarterly")
 anomalies <- safe_read_wh("mart_latest_anomalies")
@@ -151,7 +152,103 @@ history_h0 <- if (!is.null(history) && nrow(history) > 0 && "horizon" %in% names
 delta <- compute_wow_delta(nowcast_h0, history_h0)
 ```
 
-## Headline nowcasts
+## National accounts chain-volume — latest unpublished quarter
+
+```{r chain-vol-backcast, results='asis'}
+cv_label <- function(x) {
+  switch(x,
+         iron_ore   = "Iron ore",
+         coal_total = "Coal (total)",
+         tools::toTitleCase(gsub("_", " ", x)))
+}
+
+fmt_am <- function(x) format(round(x), big.mark = ",")
+
+if (nrow(chain_vol) == 0) {
+  cat('<div class="callout"><span class="label">Status</span>',
+      'No chain-volume nowcast — ABS Balance of Payments data is unavailable.',
+      '</div>\n')
+} else {
+  bc <- chain_vol |>
+    filter(horizon < 0L) |>
+    mutate(commodity = factor(commodity,
+                              levels = c("iron_ore", "coal_total"))) |>
+    arrange(commodity, quarter_end)
+
+  if (nrow(bc) == 0) {
+    cat('<div class="callout"><span class="label">Status</span>',
+        'No gap quarters — ABS chain-volume is current through the latest',
+        'PortWatch-observed quarter.</div>\n')
+  } else {
+    qtr_label <- format(as.Date(bc$quarter_end[1]), "%B %Y")
+    cat(sprintf(
+      '<p class="kicker">Backcast for %s &mdash; ABS BoP not yet published</p>\n',
+      qtr_label
+    ))
+    cat('<p style="color:var(--text-muted);max-width:680px;margin:0 0 1rem">',
+        'ABS Balance of Payments chain-volume measures lag actual quarter-end',
+        'by ~2 months. These estimates anticipate the upcoming release by',
+        'applying the validated growth-rate pass-through bridge: YoY growth in',
+        'DISR physical tonnes (back-cast from complete PortWatch data) is',
+        'chained onto the most recent ABS chain-volume level.',
+        '</p>\n')
+    cat('<div class="headline-grid">\n')
+    for (i in seq_len(nrow(bc))) {
+      r <- bc[i, ]
+      growth_pct <- 100 * (r$growth_factor - 1)
+      growth_class <- if (growth_pct >  0.5) "up"
+                      else if (growth_pct < -0.5) "down"
+                      else "flat"
+      growth_sign <- if (growth_pct >= 0) "+" else "&minus;"
+      card_html <- sprintf(
+        '<div class="headline-card"><span class="label">%s</span><div class="value-row"><span class="value">%s</span><span class="unit">A&#36;m</span></div><span class="ci">80%% CI &middot; %s &ndash; %s A&#36;m</span><span class="delta %s">%s%.1f%% YoY</span></div>',
+        cv_label(as.character(r$commodity)),
+        fmt_am(r$point_estimate_Am),
+        fmt_am(r$lower_80_Am), fmt_am(r$upper_80_Am),
+        growth_class, growth_sign, abs(growth_pct)
+      )
+      cat(card_html, "\n", sep = "")
+    }
+    cat('</div>\n')
+  }
+
+  # Q2 nowcast + Q3 forecast — secondary cards below the backcast.
+  fwd <- chain_vol |>
+    filter(horizon >= 0L) |>
+    mutate(commodity = factor(commodity,
+                              levels = c("iron_ore", "coal_total"))) |>
+    arrange(horizon, commodity)
+
+  if (nrow(fwd) > 0) {
+    cat('<h3 style="margin-top:2rem">Looking ahead &mdash; chain-volume</h3>\n')
+    cat('<p style="color:var(--text-muted);max-width:680px;margin:0 0 1rem">',
+        'Current-quarter nowcast (partial PortWatch coverage) and next-quarter',
+        'forecast (no PortWatch yet). Bands widen with horizon as the tonnage',
+        'extrapolation contributes more uncertainty.',
+        '</p>\n')
+    cat('<div class="headline-grid">\n')
+    for (i in seq_len(nrow(fwd))) {
+      r <- fwd[i, ]
+      type_lbl <- if (r$horizon == 0L) "nowcast" else "forecast"
+      qlbl <- format(as.Date(r$quarter_end), "%b %Y")
+      growth_pct <- 100 * (r$growth_factor - 1)
+      growth_sign <- if (growth_pct >= 0) "+" else "&minus;"
+      card_html <- sprintf(
+        '<div class="headline-card"><span class="label">%s &middot; %s %s</span><div class="value-row"><span class="value">%s</span><span class="unit">A&#36;m</span></div><span class="ci">80%% CI &middot; %s &ndash; %s</span><span class="delta flat">%s%.1f%% YoY</span></div>',
+        cv_label(as.character(r$commodity)),
+        qlbl, type_lbl,
+        fmt_am(r$point_estimate_Am),
+        fmt_am(r$lower_80_Am), fmt_am(r$upper_80_Am),
+        growth_sign, abs(growth_pct)
+      )
+      cat(card_html, "\n", sep = "")
+    }
+    cat('</div>\n')
+  }
+}
+```
+
+## Physical tonnage nowcasts
 
 ```{r top-line, results='asis'}
 commodity_label <- function(x) {
