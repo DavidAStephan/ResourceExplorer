@@ -29,6 +29,8 @@ utils::globalVariables(c(
   # chain_volume / extrapolation intermediates
   "cum", "cum_share", "day", "t", "total", "w",
   "seed_log_y", "latest_log_price", "tonnage_est",
+  "chain_vol_Am", "cv_commodity", "disr_lag4_Mt",
+  "point_estimate_Am", "growth_factor",
 
   # state
   "run_timestamp", "share_observed", "lower_80", "lower_95",

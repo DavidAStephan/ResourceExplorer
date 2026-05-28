@@ -24,7 +24,8 @@
 write_csv_outputs <- function(nowcast_current, portwatch, bridge_fits,
                               backtest_results, cfg,
                               production_label = NULL,
-                              coverage         = NULL) {
+                              coverage         = NULL,
+                              chain_vol        = NULL) {
   out <- cfg$paths$outputs
   fs::dir_create(out)
 
@@ -137,6 +138,11 @@ write_csv_outputs <- function(nowcast_current, portwatch, bridge_fits,
   }
 
   readr::write_csv(diagnostics, paths[["bridge_diagnostics"]])
+
+  if (!is.null(chain_vol) && nrow(chain_vol) > 0L) {
+    paths[["nowcast_chain_vol"]] <- fs::path(out, "nowcast_chain_vol.csv")
+    readr::write_csv(chain_vol, paths[["nowcast_chain_vol"]])
+  }
 
   log_info("write_csv_outputs -- wrote %d files to %s", length(paths), out)
   invisible(paths)

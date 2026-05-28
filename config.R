@@ -77,6 +77,19 @@ list(
     retry = list(max_attempts = 3L, backoff_seconds = 5L)
   ),
 
+  # ABS 5302.0 Table 6 chain-volume measures (Balance of Payments).
+  # Used post-nowcast to convert DISR physical-tonnage growth rates
+  # into national-accounts chain-volume A$m. Coal (SITC 32) is a
+  # direct match; metal ores (SITC 27+28) proxies iron ore.
+  abs = list(
+    series = list(
+      iron_ore   = list(series_id = "A3535047K",
+                        label = "Metal ores and minerals"),
+      coal_total = list(series_id = "A3535048L",
+                        label = "Coal, coke and briquettes")
+    )
+  ),
+
   bridge = list(
     hac_lag = 1L,
     min_n   = 12L,

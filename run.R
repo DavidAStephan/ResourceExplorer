@@ -115,6 +115,10 @@ raw_fred_demand <- run_step("raw_fred_demand_quarterly",
   function() fetch_fred_demand(cfg, cfg$paths$warehouse_dir),
   is_ingest = TRUE)
 
+raw_abs_chain_vol <- run_step("raw_abs_chain_vol_quarterly",
+  function() fetch_abs_chain_volume(cfg, cfg$paths$warehouse_dir),
+  is_ingest = TRUE)
+
 features <- run_step("derived_features",
   function() build_features(raw_portwatch, raw_disr, cfg,
                             wb_prices   = raw_wb_prices,
@@ -173,12 +177,28 @@ nowcast_current <- decompose_nowcast(nowcast_current, prod_models,
 anomalies <- detect_anomalies(raw_portwatch, cfg)
 save_nowcast_run(cfg, nowcast_current)
 
+# --- chain-volume conversion -------------------------------------------------
+#
+# Build chain-volume nowcast from the latest ABS observation onwards.
+# Fills any gap quarters (ABS not yet published, but PortWatch complete)
+# by running the bridge model, then applies the growth-rate pass-through.
+
+nowcast_chain_vol <- build_chain_vol_nowcast(
+  nowcast_current, raw_abs_chain_vol, raw_disr,
+  bridge_fits = prod_models,
+  features    = features,
+  portwatch   = raw_portwatch,
+  ports_meta  = ports_meta,
+  cfg         = cfg
+)
+
 # --- outputs ---------------------------------------------------------------
 
 csv_paths <- write_csv_outputs(nowcast_current, raw_portwatch,
                                bridge_fits_bench, backtest_aug, cfg,
                                production_label = production_label,
-                               coverage         = coverage)
+                               coverage         = coverage,
+                               chain_vol        = nowcast_chain_vol)
 
 if (!SKIP_REPORT) {
   render_briefing("reports/briefing/briefing.Rmd",
