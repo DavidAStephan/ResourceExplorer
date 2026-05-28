@@ -51,11 +51,15 @@ escape_html <- function(x) {
 
 # ---- data load ----
 nc_path  <- path(site_dir, "data", "nowcast_current.csv")
+cv_path  <- path(site_dir, "data", "nowcast_chain_vol.csv")
 bd_path  <- path(site_dir, "data", "bridge_diagnostics.csv")
 hist_dir <- path(site_dir, "history")
 
 nc <- if (file_exists(nc_path)) {
   read_csv(nc_path, show_col_types = FALSE)
+} else tibble::tibble()
+cv <- if (file_exists(cv_path)) {
+  read_csv(cv_path, show_col_types = FALSE)
 } else tibble::tibble()
 bd <- if (file_exists(bd_path)) {
   read_csv(bd_path, show_col_types = FALSE)
@@ -118,6 +122,74 @@ history_h0 <- if (!is.null(history) && nrow(history) > 0 && "horizon" %in% names
   dplyr::filter(history, horizon == 0L)
 } else history
 
+# ---- chain-volume cards (lead the page) ----
+cv_label <- function(x) {
+  x <- as.character(x)
+  switch(x,
+         iron_ore   = "Iron ore",
+         coal_total = "Coal (total)",
+         tools::toTitleCase(gsub("_", " ", x)))
+}
+fmt_am <- function(x) format(round(x), big.mark = ",")
+
+cv_backcast_html <- if (nrow(cv) > 0) {
+  bc <- dplyr::filter(cv, horizon < 0L) |>
+    dplyr::mutate(commodity = factor(commodity,
+                                     levels = c("iron_ore", "coal_total"))) |>
+    dplyr::arrange(commodity, quarter_end)
+  if (nrow(bc) > 0) {
+    qtr_label <- format(as.Date(bc$quarter_end[1]), "%B %Y")
+    cards <- vapply(seq_len(nrow(bc)), function(i) {
+      r <- bc[i, ]
+      g_pct <- 100 * (r$growth_factor - 1)
+      g_class <- if (g_pct >  0.5) "up"
+                 else if (g_pct < -0.5) "down"
+                 else                   "flat"
+      g_sign <- if (g_pct >= 0) "+" else "&minus;"
+      sprintf(
+        '<div class="headline-card"><span class="label">%s</span><div class="value-row"><span class="value">%s</span><span class="unit">A&#36;m</span></div><span class="ci">80%% CI &middot; %s &ndash; %s A&#36;m</span><span class="delta %s">%s%.1f%% YoY</span></div>',
+        escape_html(cv_label(r$commodity)),
+        fmt_am(r$point_estimate_Am),
+        fmt_am(r$lower_80_Am), fmt_am(r$upper_80_Am),
+        g_class, g_sign, abs(g_pct)
+      )
+    }, character(1))
+    sprintf(
+      paste0('<p class="kicker">Backcast for %s &mdash; ABS BoP not yet published</p>\n',
+             '<div class="headline-grid">\n%s\n</div>\n'),
+      qtr_label, paste(cards, collapse = "\n")
+    )
+  } else ""
+} else ""
+
+cv_forward_html <- if (nrow(cv) > 0) {
+  fwd <- dplyr::filter(cv, horizon >= 0L) |>
+    dplyr::mutate(commodity = factor(commodity,
+                                     levels = c("iron_ore", "coal_total"))) |>
+    dplyr::arrange(horizon, commodity)
+  if (nrow(fwd) > 0) {
+    cards <- vapply(seq_len(nrow(fwd)), function(i) {
+      r <- fwd[i, ]
+      type_lbl <- if (r$horizon == 0L) "nowcast" else "forecast"
+      qlbl <- format(as.Date(r$quarter_end), "%b %Y")
+      g_pct <- 100 * (r$growth_factor - 1)
+      g_sign <- if (g_pct >= 0) "+" else "&minus;"
+      sprintf(
+        '<div class="headline-card"><span class="label">%s &middot; %s %s</span><div class="value-row"><span class="value">%s</span><span class="unit">A&#36;m</span></div><span class="ci">80%% CI &middot; %s &ndash; %s</span><span class="delta flat">%s%.1f%% YoY</span></div>',
+        escape_html(cv_label(r$commodity)),
+        qlbl, type_lbl,
+        fmt_am(r$point_estimate_Am),
+        fmt_am(r$lower_80_Am), fmt_am(r$upper_80_Am),
+        g_sign, abs(g_pct)
+      )
+    }, character(1))
+    paste0('<h2 style="margin-top:2.5rem">Looking ahead &mdash; chain-volume</h2>\n',
+           '<div class="headline-grid">\n', paste(cards, collapse = "\n"),
+           "\n</div>\n")
+  } else ""
+} else ""
+
+# ---- physical-tonnage cards (secondary; existing behaviour) ----
 cards_html <- if (nrow(nc_now) > 0) {
   cards <- vapply(seq_len(nrow(nc_now)), function(i) {
     r <- nc_now[i, ]
@@ -307,7 +379,7 @@ csv_list_html <- if (length(csv_files) > 0) {
 
 # ---- page ----
 title <- "Australian Resource Export Volumes"
-tagline <- "Weekly nowcast of Australian iron-ore and coal physical-tonnage exports from IMF PortWatch AIS shipping data."
+tagline <- "Weekly chain-volume backcast and physical-tonnage nowcast of Australian iron-ore and coal exports, built from IMF PortWatch AIS shipping data."
 nice_date <- format(as.Date(today), "%e %B %Y")
 
 html <- sprintf('<!doctype html>
@@ -330,6 +402,12 @@ html <- sprintf('<!doctype html>
   </header>
 
   %s
+
+  %s
+
+  <h2 style="margin-top:2.5rem">Physical tonnage nowcasts</h2>
+  %s
+
   %s
 
   <h2>Report archive</h2>
@@ -357,6 +435,8 @@ html <- sprintf('<!doctype html>
   nice_date,
   escape_html(title),
   escape_html(tagline),
+  cv_backcast_html,
+  cv_forward_html,
   cards_html,
   prod_summary,
   history_html,
