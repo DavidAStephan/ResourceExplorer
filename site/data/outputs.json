@@ -1,38 +1,38 @@
 {
   "schema": "resourcetracker.outputs.v1",
-  "generated_at": "2026-09-22T01:22:52Z",
-  "run_timestamp": "2026-09-22T01:22:42Z",
+  "generated_at": "2026-09-29T02:24:18Z",
+  "run_timestamp": "2026-09-29T02:24:10Z",
   "horizons": {
     "current": {
       "quarter_end": "2026-09-30",
       "commodities": {
         "iron_ore": {
           "point_mt": 234.6631,
-          "lower_80": 233.0499,
-          "upper_80": 235.9567,
-          "lower_95": 232.9754,
-          "upper_95": 237.1236,
-          "share_observed": 0.913,
+          "lower_80": 234.0915,
+          "upper_80": 235.1196,
+          "lower_95": 234.065,
+          "upper_95": 235.5301,
+          "share_observed": 0.9891,
           "production_spec": "bojo",
           "rmse_vs_naive": 0.78
         },
         "coal_met": {
           "point_mt": 36.451,
-          "lower_80": 36.029,
-          "upper_80": 37.0469,
-          "lower_95": 35.6006,
-          "upper_95": 37.2777,
-          "share_observed": 0.913,
+          "lower_80": 36.3012,
+          "upper_80": 36.6606,
+          "lower_95": 36.148,
+          "upper_95": 36.7411,
+          "share_observed": 0.9891,
           "production_spec": "midas",
           "rmse_vs_naive": 0.49
         },
         "coal_thermal": {
           "point_mt": 50.3347,
-          "lower_80": 49.23,
-          "upper_80": 51.3999,
-          "lower_95": 48.7001,
-          "upper_95": 51.687,
-          "share_observed": 0.913,
+          "lower_80": 49.9413,
+          "upper_80": 50.7087,
+          "lower_95": 49.7506,
+          "upper_95": 50.8087,
+          "share_observed": 0.9891,
           "production_spec": "bojo",
           "rmse_vs_naive": 0.887
         }
